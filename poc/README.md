@@ -110,3 +110,6 @@ WCAG criterion. Across all our valid runs the baseline succeeded every time.
    ours on PATH. A Chrome left on a lane's port by a crashed run is killed before the next run starts.
 9. `runs/<timestamp>/lane-N.log` lists every command the bridge received (names only, never arguments). That
    log is how you tell "H stopped sending" from "our side hung".
+
+Session cleanup: each run requests cancellation and verifies a terminal state before releasing its browser.
+Channel cancellation is also attempted and checked; H may still retain channel slots until its own cleanup.

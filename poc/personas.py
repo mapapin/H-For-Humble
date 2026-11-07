@@ -88,6 +88,8 @@ Rules:
 - Never type a URL into the address bar except the start URL. Never use browser zoom, developer tools or page scripts.
 - Rely only on what you actually perceive in the screenshots. Do not guess hidden information.
 - If you are stuck after a few reasonable attempts, stop and report failure. Do not loop.
+- Do not place an order, make a payment, send messages, publish content or delete data. Stop before
+  the final irreversible action and report what you could verify. Never enter real payment details.
 - At the end, report honestly whether you completed the goal, the information the goal asks for, and every
   obstacle you met (what, where, how bad)."""
 

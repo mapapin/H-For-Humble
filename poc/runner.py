@@ -33,6 +33,28 @@ CHANNEL_REUSE_GRACE_S = 20  # pause between one session ending and the next bind
 STALL_S = 180  # no new agent step for this long = the session is stuck
 TERMINAL_STATUSES = {"completed", "failed", "timed_out", "interrupted"}
 log = logging.getLogger("audit")
+TERMINAL_SESSION_STATES = {"completed", "failed", "timed_out", "interrupted"}
+
+
+def close_h_session(client, session_id: str) -> bool:
+    """Cancellation is asynchronous: keep serving the browser while checking it landed."""
+    options = {"timeout_in_seconds": 5, "max_retries": 0}
+    for attempt in range(3):
+        try:
+            state = client.sessions.get_session_status(session_id, request_options=options)
+            if str(state.status) in TERMINAL_SESSION_STATES:
+                return True
+        except Exception:
+            pass
+        try:
+            client.sessions.cancel_session(session_id, request_options=options)
+        except Exception:
+            pass
+        time.sleep(1)
+    try:
+        return str(client.sessions.get_session_status(session_id, request_options=options).status) in TERMINAL_SESSION_STATES
+    except Exception:
+        return False
 
 POINTER_COMMANDS = {"click_at", "mouse_move_to", "write_at", "get_select_at", "scroll_at", "fill_secret_at"}
 MOUSE_ONLY_COMMANDS = {"click_at", "click", "double_click", "mouse_press", "mouse_release", "mouse_move_to",
@@ -214,7 +236,11 @@ class Lane:
         return (self.serving is not None and self.serving.thread.is_alive() and self.serving.error is None
                 and self.bridge is not None)
 
-    def close(self, rotate_channel: bool = False) -> None:
+    def close(self, rotate_channel: bool = False) -> bool:
+        closed = True
+        if self.bridge is not None:
+            with Client() as client:
+                closed = close_h_session(client, self.bridge.session_id)
         if self.serving is not None:
             self.serving.stop()
         self.bridge = self.serving = None
@@ -224,6 +250,7 @@ class Lane:
             import uuid
 
             self.channel_id = str(uuid.uuid4())
+        return closed
 
 
 def wait_terminal(handle, timeout_s: float) -> str | None:
@@ -282,18 +309,23 @@ def channel_status(channel_id: str | None) -> str | None:
     return r.json().get("status") if r.status_code == 200 else None
 
 
-def wait_for_slots(client: Client, needed: int, tag: str, timeout_s: float = 2400) -> None:
+def wait_for_slots(client: Client, needed: int, tag: str, timeout_s: float = 2400, stop_event=None) -> None:
     """A self-hosted browser channel is itself a trajectory on H and holds a concurrency slot until its session
     ends (or ~30 min idle timeout), so a run needs 2 free slots. Wait for them instead of hammering the API."""
     deadline = time.monotonic() + timeout_s
     while True:
+        if stop_event is not None and stop_event.is_set():
+            raise RuntimeError("Audit stopped before starting an H session")
         quota = client.sessions.get_session_quota()
         if quota.available is None or quota.available >= needed:
             return
         if time.monotonic() > deadline:
             raise RuntimeError(f"no free H session slots after {timeout_s:.0f}s ({quota.active}/{quota.limit} busy)")
         print(f"[{tag}] waiting for H slots: {quota.active}/{quota.limit} busy", flush=True)
-        time.sleep(20)
+        if stop_event is not None:
+            stop_event.wait(20)
+        else:
+            time.sleep(20)
 
 
 class BridgeThread:
@@ -326,7 +358,7 @@ class BridgeThread:
         self.thread.join(timeout=30)
 
 
-def run_one(spec: dict[str, Any], lane: "Lane | None" = None) -> dict[str, Any]:
+def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, stop_event=None) -> dict[str, Any]:
     """spec: persona, task, site, run_index, port, out_dir, headless, model (optional).
     With a lane, the run uses the lane's port; with lane.reuse_channel it also reuses its bridge and H channel."""
     persona = PERSONAS[spec["persona"]]
@@ -342,6 +374,8 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None) -> dict[str, Any]:
 
     port = lane.port if lane is not None else spec["port"]
     chrome = devtools = bridge = serving = handle = None
+    monitor_done = threading.Event()
+    monitor = None
     started = time.monotonic()
     try:
         chrome = ChromeProcess(port, persona, headless=spec.get("headless", True))
@@ -361,6 +395,10 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None) -> dict[str, Any]:
             bridge.actions.append({"t": round(time.monotonic() - bridge.t0, 2), "cmd": "tool:fill_credential", "field": key})
             if not login or key not in login:
                 return f"No stored {key} for this site."
+            from hai_drivers.web.interface import assert_secret_origin
+            from urllib.parse import urlparse
+
+            assert_secret_origin(bridge._driver.current_url(), urlparse(site["start_url"]).hostname)
             bridge._driver.input_text(str(login[key]))
             return f"Typed the stored {key} into the focused field."
 
@@ -379,21 +417,18 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None) -> dict[str, Any]:
                 bridge, serving = lane.bridge, lane.serving
                 bridge.start_run(persona, vault, seed)
                 record["channel_id"] = bridge.session_id
-                wait_for_slots(client, needed=1, tag=tag)  # our channel already holds its slot
+                wait_for_slots(client, needed=1, tag=tag, stop_event=stop_event)  # our channel already holds its slot
             else:
                 channel_id = lane.channel_id if reuse else spec.get("channel_id")  # None = new channel
                 record["channel_id"] = channel_id
                 # a new channel and the agent session each take a slot; an open (pending) channel already holds its own
-                wait_for_slots(client, needed=1 if channel_status(channel_id) == "pending" else 2, tag=tag)
-                for attempt in range(4):
-                    bridge = PersonaBridge(persona, port, api_key, rng_seed=seed, vault=vault, channel_id=channel_id)
-                    serving = BridgeThread(bridge)
-                    if bridge.ready.wait(90) and bridge._driver is not None and serving.error is None:
-                        break
-                    print(f"[{tag}] bridge not ready ({serving.error}); retry {attempt + 1}", flush=True)
-                    serving.stop()
-                    time.sleep(30 + 15 * attempt)
-                else:
+                wait_for_slots(client, needed=1 if channel_status(channel_id) == "pending" else 2, tag=tag, stop_event=stop_event)
+                # The SDK already retries channel setup using the same UUID. Creating new
+                # bridges here can leave extra channel trajectories holding quota slots.
+                bridge = PersonaBridge(persona, port, api_key, rng_seed=seed, vault=vault, channel_id=channel_id)
+                record["channel_id"] = bridge.session_id
+                serving = BridgeThread(bridge)
+                if not (bridge.ready.wait(90) and bridge._driver is not None and serving.error is None):
                     raise RuntimeError(f"local browser bridge did not become ready: {serving.error}")
                 if reuse:
                     lane.bridge, lane.serving = bridge, serving
@@ -405,6 +440,8 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None) -> dict[str, Any]:
             }
             if spec.get("model"):
                 agent["model"] = spec["model"]
+            if stop_event is not None and stop_event.is_set():
+                raise RuntimeError("Audit stopped before starting an H session")
             message = (
                 f"The website is already open in the browser at {site['start_url']}.\n"
                 f"Your goal as this user: {task['goal']}"
@@ -427,6 +464,34 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None) -> dict[str, Any]:
         print(f"[{tag}] started {record['agent_view_url']}", flush=True)
         if reuse:
             lane.prev_session_id = handle.id
+        if on_event is not None:
+            on_event({"session_id": handle.id, "agent_view_url": record["agent_view_url"],
+                      "message": "H session connected. The agent is navigating the website."})
+
+        def observe():
+            last_cancel = 0.0
+            while not monitor_done.wait(3):
+                if stop_event is not None and stop_event.is_set() and time.monotonic() - last_cancel > 15:
+                    try:
+                        handle.cancel()
+                        last_cancel = time.monotonic()
+                    except Exception:
+                        pass  # keep the bridge alive while H finishes or retries cancellation
+                if on_event is not None:
+                    data = {"actions": len(bridge.actions),
+                            "last_action": bridge.actions[-1]["cmd"] if bridge.actions else "Observing the page"}
+                    try:
+                        temp_image = out_dir / "live.tmp.png"
+                        temp_image.write_bytes(devtools.screenshot())
+                        temp_image.replace(out_dir / "live.png")
+                        data["preview_at"] = time.time()
+                    except Exception:
+                        pass
+                    on_event(data)
+
+        if on_event is not None or stop_event is not None:
+            monitor = threading.Thread(target=observe, daemon=True)
+            monitor.start()
         agent_started = time.monotonic()
         result = wait_with_watchdog(handle, total_s=float(task.get("max_time_s", 600)) + 120, tag=tag)
         record["agent_duration_s"] = round(time.monotonic() - agent_started, 1)  # excludes waiting for H slots
@@ -442,11 +507,6 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None) -> dict[str, Any]:
             record["cost_usd"] = metrics.get("total_cost")
         except Exception as exc:
             record["status_error"] = str(exc)
-        if record["status"] == "idle":
-            try:  # answered: end it now so it frees its concurrency slot instead of idling
-                handle.cancel()
-            except Exception:
-                pass
         report = result.answer
         record["report"] = report.model_dump(mode="json") if isinstance(report, BaseModel) else report
         try:
@@ -459,12 +519,18 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None) -> dict[str, Any]:
         record["error"] = f"{type(exc).__name__}: {exc}"
         record["stalled"] = str(exc).startswith("session stalled")
         traceback.print_exc()
-        if handle is not None:  # never leave a session running on H once we stop serving its browser
-            try:
-                handle.cancel()
-            except Exception:
-                pass
     finally:
+        monitor_done.set()
+        if monitor is not None:
+            monitor.join(timeout=12)
+        if handle is not None:
+            record["session_closed"] = close_h_session(client, handle.id)
+            if not record["session_closed"]:
+                record["cleanup_warning"] = "H has not confirmed session closure. Check Agent View before retrying."
+                # Do not start another run on a channel still owned by the preceding agent.
+                record["status"] = "harness_error"
+                if on_event is not None:
+                    on_event({"message": record["cleanup_warning"]})
         record["duration_s"] = round(time.monotonic() - started, 1)
         if bridge is not None:
             record["actions"] = [a for a in bridge.actions if a["cmd"] != "destroy"]
@@ -475,6 +541,10 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None) -> dict[str, Any]:
                 if record.get("status") == "harness_error":
                     lane.close(rotate_channel=True)  # next run: fresh bridge on a fresh channel
             elif serving is not None:
+                with Client() as cleanup_client:
+                    record["channel_closed"] = close_h_session(cleanup_client, bridge.session_id)
+                if record.get("channel_closed") is False and on_event is not None:
+                    on_event({"message": "H browser channel remains open; waiting for H cleanup."})
                 if handle is not None and not record.get("stalled"):
                     wait_terminal(handle, timeout_s=45)  # H sends a final `destroy` after the answer: serve it
                 serving.stop()

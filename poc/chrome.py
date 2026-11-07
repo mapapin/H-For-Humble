@@ -22,12 +22,18 @@ WINDOW = (1280, 900)
 
 
 def chrome_binary() -> str:
-    path = os.environ.get("AUDIT_CHROME") or str(DEFAULT_CHROME)
-    if not Path(path).exists():
-        raise FileNotFoundError(
-            f"Chrome not found at {path}. Set AUDIT_CHROME, or download Chrome for Testing with Selenium Manager."
-        )
-    return path
+    configured = os.environ.get("AUDIT_CHROME")
+    if configured:
+        if Path(configured).is_file():
+            return configured
+        raise FileNotFoundError("AUDIT_CHROME does not point to a Chrome executable")
+    candidates = [DEFAULT_CHROME,
+                  Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+                  Path("/usr/bin/google-chrome"), Path("/usr/bin/chromium")]
+    for path in candidates:
+        if path.is_file():
+            return str(path)
+    raise FileNotFoundError("Chrome not found. Install Google Chrome or set AUDIT_CHROME.")
 
 
 def ensure_chromedriver_on_path() -> None:
@@ -50,6 +56,8 @@ def _listening(port: int) -> bool:
 def _kill_leftover_audit_chrome(port: int) -> bool:
     """Kill a Chrome left on this port by an earlier audit run (only ours: our flag + our profile prefix)."""
     killed = False
+    if not Path("/proc").is_dir():  # macOS has no procfs; leave unrelated browsers alone.
+        return False
     for proc_dir in Path("/proc").iterdir():
         if not proc_dir.name.isdigit():
             continue
@@ -101,6 +109,7 @@ class ChromeProcess:
         deadline = time.monotonic() + 20
         while not _listening(port):
             if self.proc.poll() is not None or time.monotonic() > deadline:
+                self.close()
                 raise RuntimeError(f"Chrome failed to open debugging port {port}")
             time.sleep(0.2)
 
@@ -110,6 +119,7 @@ class ChromeProcess:
             self.proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             self.proc.kill()
+            self.proc.wait(timeout=5)
         shutil.rmtree(self.user_data_dir, ignore_errors=True)
 
 
@@ -152,7 +162,9 @@ class DevToolsController:
     def call(self, method: str, params: dict | None = None, session_id: str | None = None, timeout: float = 10) -> dict:
         msg_id = self._send(method, params, session_id)
         if not self._events[msg_id].wait(timeout):
+            self._events.pop(msg_id, None)
             raise TimeoutError(f"DevTools {method} timed out")
+        self._events.pop(msg_id, None)
         reply = self._pending.pop(msg_id)
         if "error" in reply:
             raise RuntimeError(f"DevTools {method} failed: {reply['error']}")
@@ -166,7 +178,7 @@ class DevToolsController:
                 return
             if "id" in msg:
                 self._pending[msg["id"]] = msg
-                ev = self._events.pop(msg["id"], None)
+                ev = self._events.get(msg["id"])
                 if ev:
                     ev.set()
             elif msg.get("method") == "Target.attachedToTarget":

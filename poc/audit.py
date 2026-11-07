@@ -65,12 +65,14 @@ def _run_lane(lane: int, specs: list[dict]) -> list[dict]:
         records = []
         for spec in specs:
             rec = run_one(spec, lane=lane_obj)
-            if rec.get("stalled"):  # H stopped sending commands: retry once on a fresh channel
+            if rec.get("stalled") and rec.get("session_closed"):  # retry only after the old agent released its browser
                 print(f"[{rec['tag']}] stalled; retrying once on a fresh channel", flush=True)
                 retry = run_one({**spec, "retry": 1}, lane=lane_obj)
                 retry["retry_of"] = rec.get("session_id")
                 rec = retry
             records.append(rec)
+            if rec.get("status") == "harness_error":
+                break
         return records
     finally:
         lane_obj.close()
@@ -166,6 +168,10 @@ def main() -> None:
     args = ap.parse_args()
 
     load_dotenv(HERE.parent / ".env")
+    if not os.environ.get("HAI_API_KEY"):
+        ap.error("set HAI_API_KEY in .env (HAI_API_KEY=hk-...) before starting an audit")
+    if args.lanes < 1 or args.runs < 1:
+        ap.error("--lanes and --runs must be positive")
     preset = expand_env(yaml.safe_load(Path(args.preset).read_text()))
     personas = [p.strip() for p in args.personas.split(",") if p.strip()]
     unknown = [p for p in personas if p not in PERSONAS]
@@ -175,6 +181,22 @@ def main() -> None:
     if args.tasks:
         wanted = set(args.tasks.split(","))
         tasks = [t for t in tasks if t["id"] in wanted]
+
+    if not tasks or not personas:
+        ap.error("select at least one task and one persona")
+    from hai_agents import Client
+
+    # Check before starting Chrome or opening any browser channels. Pending channels
+    # can consume slots even when there is no agent visibly running.
+    with Client() as client:
+        quota = client.sessions.get_session_quota()
+    lanes_needed = min(args.lanes, len(tasks) * len(personas) * args.runs)
+    if quota.limit is not None and lanes_needed * 2 > quota.limit:
+        ap.error(f"{lanes_needed} lanes need {lanes_needed * 2} H slots; quota is {quota.limit}. "
+                 f"Use --lanes {quota.limit // 2} or increase the H quota.")
+    if quota.available is not None and lanes_needed * 2 > quota.available:
+        ap.error(f"not enough free H slots: {quota.active}/{quota.limit} active; "
+                 f"{lanes_needed * 2} free slots required. Wait for existing sessions/channels to end.")
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     out_dir = HERE / "runs" / stamp
