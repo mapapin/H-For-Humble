@@ -314,7 +314,8 @@ def channel_status(channel_id: str | None) -> str | None:
     return r.json().get("status") if r.status_code == 200 else None
 
 
-def wait_for_slots(client: Client, needed: int, tag: str, timeout_s: float = 2400, stop_event=None) -> None:
+def wait_for_slots(client: Client, needed: int, tag: str, timeout_s: float = 2400, stop_event=None,
+                   on_wait=None) -> None:
     """A self-hosted browser channel is itself a trajectory on H and holds a concurrency slot until its session
     ends (or ~30 min idle timeout), so a run needs 2 free slots. Wait for them instead of hammering the API."""
     deadline = time.monotonic() + timeout_s
@@ -327,6 +328,11 @@ def wait_for_slots(client: Client, needed: int, tag: str, timeout_s: float = 240
         if time.monotonic() > deadline:
             raise RuntimeError(f"no free H session slots after {timeout_s:.0f}s ({quota.active}/{quota.limit} busy)")
         print(f"[{tag}] waiting for H slots: {quota.active}/{quota.limit} busy", flush=True)
+        if on_wait is not None:
+            try:
+                on_wait(quota)
+            except Exception:
+                pass
         if stop_event is not None:
             stop_event.wait(20)
         else:
@@ -411,6 +417,9 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
             return f"Typed the stored {key} into the focused field."
 
         client = Client()
+        on_wait = (lambda q: on_event({"waiting": True, "message": f"Waiting for a free H slot ({q.active}/{q.limit} "
+                                       "busy; finished browser channels are released by H after a while)."})) \
+            if on_event is not None else None
         reuse = lane is not None and lane.reuse_channel
         if reuse and lane.alive():
             lane.wait_previous_released(client, tag)
@@ -425,12 +434,13 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
                 bridge, serving = lane.bridge, lane.serving
                 bridge.start_run(persona, vault, seed)
                 record["channel_id"] = bridge.session_id
-                wait_for_slots(client, needed=1, tag=tag, stop_event=stop_event)  # our channel already holds its slot
+                wait_for_slots(client, needed=1, tag=tag, stop_event=stop_event, on_wait=on_wait)  # our channel holds its slot
             else:
                 channel_id = lane.channel_id if reuse else spec.get("channel_id")  # None = new channel
                 record["channel_id"] = channel_id
                 # a new channel and the agent session each take a slot; an open (pending) channel already holds its own
-                wait_for_slots(client, needed=1 if channel_status(channel_id) == "pending" else 2, tag=tag, stop_event=stop_event)
+                wait_for_slots(client, needed=1 if channel_status(channel_id) == "pending" else 2, tag=tag,
+                               stop_event=stop_event, on_wait=on_wait)
                 # The SDK already retries channel setup using the same UUID. Creating new
                 # bridges here can leave extra channel trajectories holding quota slots.
                 bridge = PersonaBridge(persona, port, api_key, rng_seed=seed, vault=vault, channel_id=channel_id)

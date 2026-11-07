@@ -74,15 +74,14 @@ class WorkerTests(unittest.TestCase):
             lane.assert_not_called()
             self.assertEqual(messages.get()["kind"], "failed")
 
-    def test_one_lane_reused_for_all_personas(self):
+    def test_one_lane_per_perspective(self):
         messages = queue.Queue()
-        with tempfile.TemporaryDirectory() as folder, patch("hai_agents.Client") as client, patch("runner.Lane") as lane, patch("runner.run_one", return_value={"status": "completed", "success": True}) as run:
+        with tempfile.TemporaryDirectory() as folder, patch("hai_agents.Client") as client, patch("runner.Lane") as lane, patch("runner.run_one", return_value={"status": "completed", "success": True}) as run, patch("app.jobs.LANE_STAGGER_S", 0):
             client.return_value.__enter__.return_value.sessions.get_session_quota.return_value = SimpleNamespace(available=3, active=0, limit=3)
             audit_worker("test-audit", self.config(), {}, folder, messages, threading.Event(), threading.Event())
-            lane.assert_called_once_with(0, port=9400)
+            self.assertEqual(lane.call_count, 2)
             self.assertEqual(run.call_count, 2)
-            self.assertIs(run.call_args_list[0].kwargs["lane"], run.call_args_list[1].kwargs["lane"])
-            lane.return_value.close.assert_called_once()
+            self.assertEqual(lane.return_value.close.call_count, 2)  # every lane closes its channel
 
     def test_technical_failures_are_retried_once_then_stop_the_audit(self):
         messages = queue.Queue()
@@ -127,7 +126,7 @@ class WorkerTests(unittest.TestCase):
         kinds = [messages.get()["kind"] for _ in range(messages.qsize())]
         self.assertEqual(kinds[-1], "completed")
 
-    def test_lanes_are_limited_by_free_slots(self):
+    def test_every_case_gets_a_lane_even_when_slots_are_short(self):
         messages = queue.Queue()
         config = self.config()
         config["personas"] = ["baseline", "keyboard_only", "tremor", "low_vision", "color_blind"]
@@ -135,7 +134,7 @@ class WorkerTests(unittest.TestCase):
                 patch("runner.run_one", return_value={"status": "completed", "success": True}), patch("app.jobs.LANE_STAGGER_S", 0):
             client.return_value.__enter__.return_value.sessions.get_session_quota.return_value = SimpleNamespace(available=5, active=5, limit=10)
             audit_worker("test-audit", config, {}, folder, messages, threading.Event(), threading.Event())
-            self.assertEqual(lane.call_count, 2)  # 5 free slots -> 2 lanes of 2 slots
+            self.assertEqual(lane.call_count, 5)  # every case gets a lane; lanes without a free slot wait in run_one
 
     def test_stopped_queue_does_not_launch_an_agent(self):
         stopped = threading.Event()

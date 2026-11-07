@@ -120,9 +120,11 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
                         available = client.sessions.get_session_quota().available or 2
                 except Exception:
                     available = 2
-            n_lanes = max(1, min(jobs.qsize(), wanted_lanes, MAX_LANES, available // 2))
+            # One lane per case up to MAX_LANES, whatever the free slots right now: a lane without a free slot waits
+            # for one (shown as "waiting" in the UI) and starts as soon as H releases a slot.
+            n_lanes = max(1, min(jobs.qsize(), wanted_lanes, MAX_LANES))
             emit("progress", message=f"Running {jobs.qsize()} cases on {n_lanes} parallel browser"
-                 f"{'s' if n_lanes > 1 else ''} ({available} H slots free).", lanes_total=n_lanes)
+                 f"{'s' if n_lanes > 1 else ''} ({available} H slots free, 2 per agent).", lanes_total=n_lanes)
             round_records = []
 
             def lane_loop(idx, rnd=rnd, script=script, jobs=jobs, round_records=round_records):
@@ -187,6 +189,13 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
                 return
             round_records.sort(key=lambda r: order.get((r.get("task"), r.get("persona"), r.get("run")), 0))
             rows = summarize([r for r in round_records if "persona" in r and "task" in r])
+            if rnd == 0 and not config.get("patch"):
+                try:  # what a static checker (axe-core) sees on the same pages, to compare with what agents lived
+                    from static_scan import scan_snapshots
+                    emit("progress", message="Static scan (axe-core) of the pages the agents visited.")
+                    emit("static", static=scan_snapshots(round_records, out_dir, headers=credentials.get("headers")))
+                except Exception:
+                    pass
             first_round = first_round or round_records
             card = scorecard(round_records, personas)
             entry = {"round": rnd, "summary": rows, "score": card["score"], "completion_score": score(rows),
@@ -301,6 +310,12 @@ class JobManager:
                     store.event(audit_id, "progress", f"Round {e['round'] + 1}: score {e['score']}/100"
                                 + (" · every perspective passed." if e["passed"] else
                                    f" · {len(e.get('new_fixes', []))} new fixes suggested." if e.get("new_fixes") else "."))
+                elif kind == "static":
+                    store.update(audit_id, static_scan=item["static"])
+                    t = item["static"].get("totals") or {}
+                    if t:
+                        store.event(audit_id, "progress", f"axe-core static scan: {t.get('rules', 0)} rule violations "
+                                    f"on {len(item['static'].get('pages', []))} pages.")
                 elif kind == "context":
                     store.update(audit_id, context=item["context"])
                     store.event(audit_id, "progress", "Linkup found the site's declared accessibility context.")
@@ -319,8 +334,11 @@ class JobManager:
                     if lane is not None and str(lane) in lanes:
                         current = lanes[str(lane)]
                         current.update(item)
+                        if item.get("waiting"):
+                            current["state"] = "waiting"
                         if item.get("session_id"):
                             current["state"] = "running"
+                            current.pop("waiting", None)
                         if message:
                             current["message"] = message
                         if message:

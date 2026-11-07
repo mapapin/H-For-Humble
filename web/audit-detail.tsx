@@ -3,7 +3,7 @@ import { ArrowDownToLine, ArrowLeft, ArrowUpRight, Clock3, LockKeyhole, Pause, P
 import { api, date, Dialog, ErrorNote, host, pname, Spinner, Status, terminal, total } from './shared';
 import type { Audit, Run } from './shared';
 import { FixesPanel } from './fixes';
-import { BarrierList, ContextCard, EffortChart, PerspectiveGrid, ScoreHero } from './report';
+import { BarrierList, ContextCard, EffortChart, PerspectiveGrid, ScoreHero, StaticCard } from './report';
 import { ReplayDialog } from './replay';
 
 const TABS = ['report', 'fixes', 'activity'] as const;
@@ -41,6 +41,7 @@ export function AuditDetail({ id, onBack, onRerun, onUpdate, onOpen = next => { 
   const isActive = !terminal(audit.status);
   const fixCount = audit.fixes?.patch?.fixes?.length || audit.parent?.fixes?.patch?.fixes?.length || 0;
   const lanes = Object.values(audit.progress?.lanes || {}).filter(l => l.state === 'running' || l.state === 'starting').length;
+  const waitingLanes = Object.values(audit.progress?.lanes || {}).filter(l => l.state === 'waiting').length;
   const replayable = records.filter(r => r.replay?.steps?.length || r.final_screenshot);
   const roundLabel = audit.rounds?.length ? ` · round ${audit.rounds.length + (isActive ? 1 : 0)}` : '';
   return <>
@@ -58,7 +59,7 @@ export function AuditDetail({ id, onBack, onRerun, onUpdate, onOpen = next => { 
     </div>
     {error && <ErrorNote message={error} />}{audit.error && <ErrorNote message={audit.error} />}
     {!connected && isActive && <div className="soft-note"><Clock3 size={16} />Reconnecting to the live feed. Your audit continues on the server.</div>}
-    {isActive && <div className="live-strip"><span className="live-dot" /><strong>{audit.status === 'paused' ? 'Paused: running agents finish, no new run starts' : audit.status === 'stopping' ? 'Stopping: asking H to end every session' : lanes ? `${lanes} agent${lanes > 1 ? 's' : ''} exploring in parallel${roundLabel}` : `Preparing browsers${roundLabel}`}</strong><span>{audit.progress.completed || 0} of {total(audit)} runs finished · each agent drives its own Chrome with its impairment applied</span></div>}
+    {isActive && <div className="live-strip"><span className="live-dot" /><strong>{audit.status === 'paused' ? 'Paused: running agents finish, no new run starts' : audit.status === 'stopping' ? 'Stopping: asking H to end every session' : lanes ? `${lanes} agent${lanes > 1 ? 's' : ''} exploring in parallel${waitingLanes ? `, ${waitingLanes} waiting for a free H slot` : ''}${roundLabel}` : waitingLanes ? `Waiting for free H slots${roundLabel}` : `Preparing browsers${roundLabel}`}</strong><span>{audit.progress.completed || 0} of {total(audit)} runs finished · each agent drives its own Chrome with its impairment applied</span></div>}
 
     <ScoreHero audit={audit} />
     <ContextCard audit={audit} />
@@ -73,6 +74,7 @@ export function AuditDetail({ id, onBack, onRerun, onUpdate, onOpen = next => { 
           <section className="section"><div className="section-heading"><div><h2>What stopped users</h2><p>Reported by the agents, worst first. Open the replay to see it happen.</p></div></div><BarrierList audit={audit} onReplay={setReplay} /></section>
           <section className="section"><div className="section-heading"><div><h2>Effort compared with the baseline</h2><p>The same journey, the same agent, one impairment.</p></div></div><EffortChart audit={audit} />{!audit.scores?.perspectives && <div className="quiet-note">Appears when two perspectives have finished.</div>}</section>
         </div>
+        <StaticCard audit={audit} />
         {fixCount > 0 && <button className="fix-teaser" onClick={() => setTab('fixes')}><Sparkles size={18} /><span><strong>{fixCount} suggested fix{fixCount > 1 ? 'es' : ''}, with before/after previews</strong><small>{audit.parent ? 'Compare this re-evaluation with the original audit.' : 'See each fix as the blocked user would, then evaluate again with the fixes applied.'}</small></span><ArrowUpRight size={16} /></button>}
         <p className="report-footnote">Simulated users driven by H computer-use agents, not an accessibility certification. Technical errors are excluded from scores.</p>
       </>}

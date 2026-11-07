@@ -51,9 +51,12 @@ export function FixesPanel({ audit, onOpen }: { audit: Audit; onOpen: (id: strin
 }
 
 function PersonaComparisons({ comparisons, base }: { comparisons: Comparison[]; base: string }) {
+  const [current, setCurrent] = useState(0);
   if (!comparisons.length) return null;
-  return <section className="section"><div className="section-heading"><div><h2>Before and after, per perspective</h2><p>All fixes applied, on the page where each perspective got stuck. Drag the divider.</p></div></div>
-    <div className="compare-grid">{comparisons.map(c => <figure key={c.id}><CompareSlider before={base + c.before} after={base + c.after} label={pname(c.persona)} split={c.split} /><figcaption><PersonaIcon id={c.persona} size={14} />{pname(c.persona)}</figcaption></figure>)}</div></section>;
+  const c = comparisons[Math.min(current, comparisons.length - 1)];
+  return <section className="section"><div className="section-heading"><div><h2>Before and after, through their eyes</h2><p>All fixes applied, on the page where each perspective got stuck, rendered as that user sees it. Drag the divider.</p></div></div>
+    <div className="compare-tabs" role="tablist" aria-label="Perspective">{comparisons.map((x, i) => <button key={x.id} role="tab" aria-selected={i === current} className={i === current ? 'selected' : ''} onClick={() => setCurrent(i)}><PersonaIcon id={x.persona} size={13} />{pname(x.persona)}</button>)}</div>
+    <figure className="compare-feature" key={c.id}><CompareSlider before={base + c.before} after={base + c.after} label={pname(c.persona)} split={c.split} /><figcaption>{c.page_url.replace(/^https?:\/\//, '')} · as seen by the {pname(c.persona).toLowerCase()} perspective</figcaption></figure></section>;
 }
 
 function FixCard({ fix, comparison, base }: { fix: Fix; comparison?: Comparison; base: string }) {

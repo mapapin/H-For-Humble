@@ -76,6 +76,7 @@ function PerspectiveTile({ audit, persona, onReplay }: { audit: Audit; persona: 
   const score: PerspectiveScore | undefined = audit.scores?.perspectives?.[persona];
   const lane = latestLane(audit, persona);
   const running = !terminal(audit.status) && lane && ['starting', 'running'].includes(lane[1].state || '');
+  const waiting = !terminal(audit.status) && lane?.[1].state === 'waiting';
   const planned = audit.config.tasks.length * audit.config.repetitions;
   const last = records[records.length - 1];
   const shown = last && !running ? last : undefined;
@@ -88,13 +89,13 @@ function PerspectiveTile({ audit, persona, onReplay }: { audit: Audit; persona: 
     <header><PersonaIcon id={persona} size={16} /><div><h3>{pname(persona)}</h3><small>{persona === 'baseline' ? 'Reference user' : short(persona)}</small></div>
       {running ? <span className="live-pill"><span className="live-dot" />LIVE</span> : score?.grade ? <span className={`grade-badge grade-${score.grade}`} aria-label={`Grade ${score.grade}`}>{score.grade}</span> : null}</header>
     <div className="p-screen">
-      {liveSrc ? <img src={liveSrc} alt={`Live browser of the ${pname(persona)} agent`} /> : still ? <img src={still} alt={`Final screen of the ${pname(persona)} run`} /> : <div className="p-screen-empty">{running || lane?.[1].state === 'starting' ? <><Loader2 className="spin" size={20} /><span>Opening a browser…</span></> : terminal(audit.status) ? <span>Not run</span> : <><Clock3 size={20} /><span>Waiting for a free browser</span></>}</div>}
+      {liveSrc ? <img src={liveSrc} alt={`Live browser of the ${pname(persona)} agent`} /> : still ? <img src={still} alt={`Final screen of the ${pname(persona)} run`} /> : <div className="p-screen-empty">{waiting ? <><Clock3 size={20} /><span>Waiting for a free H slot</span><small>Starts as soon as H releases one</small></> : running ? <><Loader2 className="spin" size={20} /><span>Opening a browser…</span></> : terminal(audit.status) ? <span>Not run</span> : <><Clock3 size={20} /><span>Queued</span></>}</div>}
       {running && <div className="p-caption"><span className="step-badge">Step {lane![1].step || 0}</span><p>{lane![1].thought || lane![1].message || 'Connecting to H…'}</p></div>}
       {shown && <button className="p-replay" onClick={() => onReplay(shown)} aria-label={`Replay the ${pname(persona)} run`}><Play size={16} />Replay</button>}
     </div>
     <footer>
       {outcome && <span className={`outcome-chip ${outcome}`}>{outcome === 'pass' ? <CircleCheck size={13} /> : outcome === 'error' ? <AlertOctagon size={13} /> : <CircleX size={13} />}{outcome === 'pass' ? 'Completed' : outcome === 'partial' ? `${score!.completed}/${score!.tested} completed` : outcome === 'error' ? 'Technical error' : 'Blocked'}</span>}
-      {!outcome && <span className="outcome-chip neutral">{running ? 'Exploring' : terminal(audit.status) ? 'Not run' : 'Queued'}</span>}
+      {!outcome && <span className="outcome-chip neutral">{running ? 'Exploring' : waiting ? 'Waiting for H' : terminal(audit.status) ? 'Not run' : 'Queued'}</span>}
       {score && score.tested > 0 && <dl className="p-metrics">
         <div><dt>Steps</dt><dd>{score.steps ?? '—'}{score.steps_vs_baseline && score.steps_vs_baseline >= 1.15 ? <em>{times(score.steps_vs_baseline)}</em> : null}</dd></div>
         <div><dt>Time</dt><dd>{duration(score.time_s)}</dd></div>
@@ -146,4 +147,30 @@ export function EffortChart({ audit }: { audit: Audit }) {
     </div>)}
     <p className="effort-legend"><span className="baseline-mark static" />Baseline user. Bars in red: the journey was not completed (steps until the agent gave up).</p>
   </div>;
+}
+
+const wcagLabel = (tag: string) => { const d = tag.replace('wcag', ''); return d.length >= 3 ? `${d[0]}.${d[1]}.${d.slice(2)}` : d.toUpperCase(); };
+
+/** A static checker (axe-core) on the same pages, against what the agents lived: which findings stop people,
+ * and which blockers no rule catches. */
+export function StaticCard({ audit }: { audit: Audit }) {
+  const scan = audit.static_scan;
+  if (!scan || !scan.totals) return null;
+  const per = audit.scores?.perspectives || {};
+  const blocked = Object.entries(per).filter(([k, p]) => k !== 'baseline' && p.completion === 0).map(([k]) => k);
+  const covered = new Set((scan.violations || []).flatMap(v => v.personas));
+  const missed = blocked.filter(p => !covered.has(p));
+  const top = (scan.violations || []).slice(0, 4);
+  return <section className="static-card" aria-label="Static checker comparison">
+    <div className="static-head">
+      <div><span className="eyebrow">STATIC CHECKER VS REAL JOURNEYS</span>
+        <h3>axe-core flags <b>{scan.totals.rules} rule{scan.totals.rules === 1 ? '' : 's'}</b> on the {scan.pages?.length || 0} pages the agents visited. {blocked.length ? <>Our agents found <b>{blocked.length} perspective{blocked.length > 1 ? 's' : ''} blocked</b>{missed.length ? <>, {missed.length === blocked.length ? 'none' : `${missed.length}`} of which no rule detects: <span className="blocked-names">{missed.map(pname).join(', ')}</span>.</> : ', each one related to a flagged rule.'}</> : 'No perspective was blocked on this journey.'}</h3></div>
+    </div>
+    {top.length > 0 && <ul className="static-list">{top.map(v => <li key={v.id}>
+      <span className={`impact impact-${v.impact || 'minor'}`}>{v.impact || 'minor'}</span>
+      <span className="static-rule"><a href={v.helpUrl} target="_blank" rel="noreferrer">{v.help}</a><small>{v.id} · {v.nodes} element{v.nodes > 1 ? 's' : ''}{v.wcag.length ? ` · WCAG ${v.wcag.map(wcagLabel).join(', ')}` : ''}</small></span>
+      {v.blocked_someone ? <span className="outcome-chip fail">Blocked {v.personas.filter(p => blocked.includes(p)).map(pname).join(', ')}</span> : v.related_to_barrier ? <span className="outcome-chip partial">Related to a barrier</span> : <span className="outcome-chip neutral">No barrier seen</span>}
+    </li>)}</ul>}
+    <p className="static-note">Static rules check the code; Humble's agents live the journey. Use both: the agents tell you which findings actually stop people, and what no rule can see.</p>
+  </section>;
 }
