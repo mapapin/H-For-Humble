@@ -341,6 +341,8 @@ class JobManager:
                     message = item.pop("message", None)
                     if lane is not None and str(lane) in lanes:
                         current = lanes[str(lane)]
+                        if item.get("waiting") and current.get("state") == "waiting":
+                            message = None  # already logged once for this lane
                         current.update(item)
                         if item.get("waiting"):
                             current["state"] = "waiting"
