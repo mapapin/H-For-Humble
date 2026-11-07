@@ -180,6 +180,25 @@ Then poll `GET /sessions/{id}/status` until terminal, and read `latest_answer` f
 - **Demo/example repo**: https://github.com/hcompai/computer-use-agents-demos (the sponsor PDF lists the older name
   `hcompai/agents-api-demos`). "Don't start from scratch: fork a demo and build on top of it."
 
+### Gotchas we hit (tested 2026-11-07)
+- **Cloud works out of the box**: `holo "..."` (h/web-surfer-flash) costs about $0.003 for a short task.
+- **Local desktop on Linux (Ubuntu 24.04, X11)** needs `sudo apt install gnome-screenshot`. PyScreeze checks for it
+  **once at import**, so **restart `holo`** after installing it. A running REPL keeps failing with
+  "To take screenshots, you must install Pillow ≥ 9.2.0 and gnome-screenshot".
+- `h/holo-desktop` also runs **shell commands** on the machine (it tried `sudo apt install`, `docker ps`, `mkdir`).
+  For a GUI-only agent (better for the "use of computer use" score, and safer), create our own agent with
+  `environments=[{"id": "my-laptop", "kind": "desktop", "shell": False}]` (shell defaults to false).
+- The `holo` CLI keeps its key in `~/.config/hai/.env` (`holo login`). The SDK reads `HAI_API_KEY` from the env.
+
+### Persistent logins in the cloud (no local machine needed)
+- Use a **browser profile**: set `"use_default_browser_profile": true` on the `web` environment. Sign in once,
+  e.g. by taking over the cloud browser in Agent View. Each session writes cookies back, so later sessions start signed in.
+  Alternatively, upload a Chrome user-data dir built with `--password-store=basic` (Linux or Docker, Chromium ≤ the runner's version).
+- **Vaults** (H-hosted or 1Password) store username/password/TOTP. The agent fills them with `fill_secret_at`
+  without seeing them, so it can re-login when cookies expire. Email/SMS codes go through the `request_otp` custom tool (e.g. an IMAP handler).
+- **Schedules** (cron, at most every 5 min) and **webhooks** run unattended sessions.
+- Risk: Google (and other sites) may block or expire sign-ins from cloud or automated browsers. Test early and have a fallback.
+
 ### Writing good agent tasks
 The H agent does **not** see our conversation. Each task must name the app or site, the account, the target, and
 **when it is done / what to return**. Write it as an imperative instruction.
@@ -217,10 +236,21 @@ product itself is optional but makes us eligible for more and adds to originalit
 
 ## 9. Our project (fill in as we go)
 
-- **Use case / problem**: TBD
-- **Target user**: TBD
-- **Agent flow (problem → actions → result)**: TBD
-- **Stack**: TBD (must include the H Agents API, plus at least one of Stripe / Gladia / Linkup / Devin)
+- **Use case / problem** (chosen 2026-11-07): synthetic usability + accessibility testing. A team pastes a URL
+  and its user journeys (its own tasks, saved as presets, plus suggestions from Linkup). H agents try each
+  journey as several simulated users: a baseline, then low vision (200% zoom + blur), colour blind, hand tremor
+  and keyboard only. The gap between a persona and the baseline measures how accessible the site is for that
+  group, and several baseline runs measure overall ease of use.
+- **Target user**: product / QA teams. The European Accessibility Act has applied since June 2025.
+- **Agent flow**: preset (site, auth, tasks) → one H session per (task × persona × run) in a Chrome we host and
+  impair → structured report per run (completed, answer, obstacles) → scores and gaps vs baseline → fix
+  suggestions tab built from the page code, with an optional "Open in Devin" for a PR on the full codebase.
+- **Auth**: header tokens (added by our browser), form logins (`fill_credential` tool; the value never
+  reaches the model). H's own vault only works on H's cloud browser.
+- **Stack**: H Agents API (`hai-agents`, `host: user_device` bridge on our own Chrome) + Linkup (task
+  suggestions) + Devin API (fixes, "best use of Devin" prize). Gladia is not planned.
+- **Proof of concept**: `poc/`. Read `poc/README.md` first: architecture, how to run, results and H gotchas
+  (each self-hosted browser channel takes a session slot).
 - **Demo script**: TBD
 - **How judges test it live**: TBD
 

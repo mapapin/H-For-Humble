@@ -1,0 +1,24 @@
+# A test preset: the site, how to get in, and the user journeys to test.
+# Customers would save presets like this one per site/environment (staging, prod...).
+site:
+  name: Mugs & Co (deliberately inaccessible demo shop)
+  start_url: http://127.0.0.1:8765/
+  auth:
+    # Form login: the agent focuses the field and calls the fill_credential tool; the value is typed by our
+    # code and never sent to the model. Test account of our local demo app only.
+    login:
+      username: alex@demo-shop.test
+      password: mug-lover-2026
+    # Header auth (staging behind a gateway): added to every request by our browser, never seen by the agent.
+    # ${VAR} is read from the environment.
+    headers:
+      X-Audit-Token: ${DEMO_TOKEN}
+
+tasks:
+  - id: buy-blue-mug
+    goal: >-
+      Sign in, add one Blue Mug that is currently in stock to your cart, go to the checkout page,
+      and report the order total shown there.
+    expect_answer_contains: "19.90"
+    max_steps: 35
+    max_time_s: 600
