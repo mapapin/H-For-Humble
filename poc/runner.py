@@ -121,6 +121,7 @@ class PersonaBridge(SeleniumBrowserBridge):
         self.rng = random.Random(rng_seed)
         self.t0 = time.monotonic()
         self.actions: list[dict[str, Any]] = []
+        self.dispatched = 0  # every command served, screenshots included
 
     def create_driver(self):
         driver = super().create_driver()
@@ -136,6 +137,7 @@ class PersonaBridge(SeleniumBrowserBridge):
         self.rng = random.Random(rng_seed)
         self.t0 = time.monotonic()
         self.actions = []
+        self.dispatched = 0
         # The bridge dedups redelivered commands by command_uid; clear it so a new session can never be answered
         # with a previous session's cached result (precaution: we have not seen uids repeat across sessions).
         self._results.clear()
@@ -186,6 +188,7 @@ class PersonaBridge(SeleniumBrowserBridge):
                 args["x"] = round(args["x"] / p.zoom)
                 args["y"] = round(args["y"] / p.zoom)
         result, error = super()._dispatch(name, args)
+        self.dispatched += 1
         if error:
             rec["error"] = error[:300]
         if name not in QUIET_COMMANDS or error:
@@ -270,7 +273,11 @@ def wait_terminal(handle, timeout_s: float) -> str | None:
     return status
 
 
-def wait_with_watchdog(handle, total_s: float, tag: str, stall_s: float = STALL_S, poll_s: float = 60):
+FIRST_STEP_S = 90  # a session that has not made its first step by then never received the browser
+
+
+def wait_with_watchdog(handle, total_s: float, tag: str, stall_s: float = STALL_S, poll_s: float = 60,
+                       first_step_s: float = FIRST_STEP_S):
     """wait_for_completion (which also runs our custom tools), but give up early when the agent stops making
     progress: a session whose browser commands stopped flowing otherwise hangs until total_s.
 
@@ -279,6 +286,7 @@ def wait_with_watchdog(handle, total_s: float, tag: str, stall_s: float = STALL_
     import httpx
 
     deadline = time.monotonic() + total_s
+    started = time.monotonic()
     last_steps, last_progress = None, time.monotonic()
     while True:
         try:
@@ -294,12 +302,123 @@ def wait_with_watchdog(handle, total_s: float, tag: str, stall_s: float = STALL_
         now = time.monotonic()
         if steps != last_steps:
             last_steps, last_progress = steps, now
-        elif now - last_progress > stall_s:
+        if not steps and now - started > first_step_s:
+            print(f"[{tag}] STALLED: no first step after {first_step_s:.0f}s.", flush=True)
+            raise TimeoutError(f"session stalled at step 0: no first step after {first_step_s:.0f}s")
+        if steps == last_steps and now - last_progress > stall_s:
             print(f"[{tag}] STALLED: no new step for {stall_s:.0f}s at step {steps}. Stop session {handle.id} "
                   "from the H web UI (cancel via API does not work while it waits on the browser).", flush=True)
             raise TimeoutError(f"session stalled at step {steps}: no progress for {stall_s:.0f}s")
         if now > deadline:
             raise TimeoutError(f"session did not finish within {total_s:.0f}s")
+
+
+# ------------------------------------------------------------------------------------------ channel recycling
+# H keeps a finished browser channel "pending" (holding a session slot) until its periodic cleanup, ~25-30 min.
+# A pending channel can be bound again by a new bridge and agent session, which then needs 1 new slot instead of 2.
+# So we keep our own channels in a small cross-process pool (guarded by CHANNEL_LOCK) and reuse an idle pending one
+# before opening a new one. Once H releases channels at session end, the pool simply stays empty.
+POOL_FILE = Path(tempfile.gettempdir()) / "h-audit-channels.json"
+RECYCLE_CHANNELS = os.environ.get("HUMBLE_RECYCLE_CHANNELS", "1") != "0"
+
+
+def _pool_load() -> dict[str, dict]:
+    try:
+        return json.loads(POOL_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def _pool_save(pool: dict[str, dict]) -> None:
+    tmp = POOL_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(pool))
+    tmp.replace(POOL_FILE)
+
+
+def _pid_alive(pid) -> bool:
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except Exception:
+        return False
+
+
+def take_recycled_channel() -> str | None:
+    """An idle channel of ours that H still holds as pending, reserved for this process. Call under CHANNEL_LOCK."""
+    pool, now = _pool_load(), time.time()
+    found = None
+    for cid, entry in sorted(pool.items(), key=lambda kv: kv[1].get("released_at", 0)):
+        if entry.get("in_use") and _pid_alive(entry["in_use"]):
+            continue
+        if now - entry.get("released_at", 0) < CHANNEL_REUSE_GRACE_S:
+            continue
+        if now - entry.get("created_at", now) > 40 * 60:  # H will clean it up any minute: do not start on it
+            pool.pop(cid, None)
+            continue
+        try:
+            status = channel_status(cid)
+        except Exception:
+            continue
+        if status != "pending":
+            pool.pop(cid, None)
+            continue
+        entry.update(in_use=os.getpid(), taken_at=now)
+        found = cid
+        break
+    _pool_save(pool)
+    return found
+
+
+def pool_register(channel_id: str) -> None:
+    """Mark a channel as ours and in use (under CHANNEL_LOCK)."""
+    pool = _pool_load()
+    entry = pool.setdefault(channel_id, {"created_at": time.time()})
+    entry["in_use"] = os.getpid()
+    _pool_save(pool)
+
+
+def pool_release(channel_id: str, reusable: bool = True) -> None:
+    lock = open(CHANNEL_LOCK, "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        pool = _pool_load()
+        if reusable and channel_id in pool:
+            pool[channel_id].update(in_use=None, released_at=time.time())
+        else:
+            pool.pop(channel_id, None)
+        _pool_save(pool)
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
+def acquire_channel(client: Client, tag: str, stop_event=None, on_wait=None, timeout_s: float = 2400) -> str | None:
+    """Slots for one run (under CHANNEL_LOCK): returns an idle recycled channel (1 more slot needed), or None for
+    a fresh channel (2 slots). Waits while neither is possible."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        if stop_event is not None and stop_event.is_set():
+            raise RuntimeError("Audit stopped before starting an H session")
+        quota = client.sessions.get_session_quota()
+        if quota.available is None or quota.available >= 1:
+            cid = take_recycled_channel() if RECYCLE_CHANNELS else None
+            if cid:
+                print(f"[{tag}] recycling pending browser channel {cid}", flush=True)
+                return cid
+            if quota.available is None or quota.available >= 2:
+                return None
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"no free H session slots after {timeout_s:.0f}s ({quota.active}/{quota.limit} busy)")
+        print(f"[{tag}] waiting for H slots: {quota.active}/{quota.limit} busy", flush=True)
+        if on_wait is not None:
+            try:
+                on_wait(quota)
+            except Exception:
+                pass
+        if stop_event is not None:
+            stop_event.wait(10)
+        else:
+            time.sleep(10)
 
 
 def channel_status(channel_id: str | None) -> str | None:
@@ -437,14 +556,20 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
                 wait_for_slots(client, needed=1, tag=tag, stop_event=stop_event, on_wait=on_wait)  # our channel holds its slot
             else:
                 channel_id = lane.channel_id if reuse else spec.get("channel_id")  # None = new channel
+                if channel_id is None and not reuse:
+                    channel_id = acquire_channel(client, tag, stop_event=stop_event, on_wait=on_wait)
+                    record["recycled_channel"] = channel_id is not None
+                else:
+                    # a new channel and the agent session each take a slot; a pending channel already holds its own
+                    wait_for_slots(client, needed=1 if channel_status(channel_id) == "pending" else 2, tag=tag,
+                                   stop_event=stop_event, on_wait=on_wait)
                 record["channel_id"] = channel_id
-                # a new channel and the agent session each take a slot; an open (pending) channel already holds its own
-                wait_for_slots(client, needed=1 if channel_status(channel_id) == "pending" else 2, tag=tag,
-                               stop_event=stop_event, on_wait=on_wait)
                 # The SDK already retries channel setup using the same UUID. Creating new
                 # bridges here can leave extra channel trajectories holding quota slots.
                 bridge = PersonaBridge(persona, port, api_key, rng_seed=seed, vault=vault, channel_id=channel_id)
                 record["channel_id"] = bridge.session_id
+                if not reuse:
+                    pool_register(bridge.session_id)
                 serving = BridgeThread(bridge)
                 if not (bridge.ready.wait(90) and bridge._driver is not None and serving.error is None):
                     raise RuntimeError(f"local browser bridge did not become ready: {serving.error}")
@@ -571,6 +696,7 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
         record["duration_s"] = round(time.monotonic() - started, 1)
         if bridge is not None:
             record["actions"] = [a for a in bridge.actions if a["cmd"] != "destroy"]
+            record["commands_served"] = bridge.dispatched
         if handle is not None and spec.get("replay", True):
             try:  # step-by-step replay from H's history: screenshots, thoughts, actions, persona effects
                 with Client() as replay_client:
@@ -585,13 +711,14 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
                 if record.get("status") == "harness_error":
                     lane.close(rotate_channel=True)  # next run: fresh bridge on a fresh channel
             elif serving is not None:
-                with Client() as cleanup_client:
-                    record["channel_closed"] = close_h_session(cleanup_client, bridge.session_id)
-                if record.get("channel_closed") is False and on_event is not None:
-                    on_event({"message": "H browser channel remains open; waiting for H cleanup."})
                 if handle is not None and not record.get("stalled"):
                     wait_terminal(handle, timeout_s=45)  # H sends a final `destroy` after the answer: serve it
+                with Client() as cleanup_client:
+                    record["channel_closed"] = close_h_session(cleanup_client, bridge.session_id)
                 serving.stop()
+                # A channel H still holds as pending is recycled by the next run (not after a technical error).
+                pool_release(bridge.session_id, reusable=record.get("status") != "harness_error"
+                             and record.get("session_closed") is not False)
         except Exception as exc:
             record["cleanup_error"] = f"bridge: {exc}"
         if devtools is not None:
@@ -618,7 +745,7 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
                 record["cleanup_error"] = f"chrome: {exc}"
 
     browser_actions = [a for a in record.get("actions", []) if not a["cmd"].startswith("tool:")]
-    if record.get("steps") and not browser_actions:
+    if record.get("steps") and not browser_actions and not record.get("commands_served"):
         # The agent acted but none of its browser commands went through PersonaBridge._dispatch, so persona
         # filters were not applied: the run must not be trusted.
         record["harness_warning"] = "no browser action went through the persona bridge; result invalid"
