@@ -155,3 +155,57 @@ class WorkerTests(unittest.TestCase):
         with patch.object(SeleniumBrowserBridge, "_dispatch", return_value=("ok", None)) as dispatch:
             bridge._dispatch("click_at", {"x": 100, "y": 60})
             dispatch.assert_called_once_with("click_at", {"x": 50, "y": 30})
+
+
+class ChannelPoolTests(unittest.TestCase):
+    def setUp(self):
+        import runner
+        self.runner = runner
+        self.tmp = tempfile.TemporaryDirectory()
+        self.patches = [patch.object(runner, "POOL_FILE", __import__("pathlib").Path(self.tmp.name) / "pool.json"),
+                        patch.object(runner, "CHANNEL_LOCK", __import__("pathlib").Path(self.tmp.name) / "lock")]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        self.tmp.cleanup()
+
+    def test_released_pending_channel_is_recycled_once(self):
+        r = self.runner
+        r.pool_register("chan-1")
+        self.assertIsNone(r.take_recycled_channel())  # still in use by this process
+        r.pool_release("chan-1")
+        with patch.object(r, "channel_status", return_value="pending"), patch.object(r, "CHANNEL_REUSE_GRACE_S", 0):
+            self.assertEqual(r.take_recycled_channel(), "chan-1")
+            self.assertIsNone(r.take_recycled_channel())  # reserved now
+
+    def test_released_channel_h_closed_is_dropped(self):
+        r = self.runner
+        r.pool_register("chan-2")
+        r.pool_release("chan-2")
+        with patch.object(r, "channel_status", return_value="failed"), patch.object(r, "CHANNEL_REUSE_GRACE_S", 0):
+            self.assertIsNone(r.take_recycled_channel())
+        self.assertEqual(r._pool_load(), {})
+
+    def test_channel_after_technical_error_is_not_recycled(self):
+        r = self.runner
+        r.pool_register("chan-3")
+        r.pool_release("chan-3", reusable=False)
+        self.assertEqual(r._pool_load(), {})
+
+    def test_acquire_prefers_recycled_then_fresh_then_waits(self):
+        r = self.runner
+        client = MagicMock()
+        client.sessions.get_session_quota.return_value = SimpleNamespace(available=1, active=9, limit=10)
+        with patch.object(r, "take_recycled_channel", return_value="chan-4"):
+            self.assertEqual(r.acquire_channel(client, "t"), "chan-4")
+        client.sessions.get_session_quota.return_value = SimpleNamespace(available=4, active=6, limit=10)
+        with patch.object(r, "take_recycled_channel", return_value=None):
+            self.assertIsNone(r.acquire_channel(client, "t"))
+        stop = threading.Event()
+        stop.set()
+        client.sessions.get_session_quota.return_value = SimpleNamespace(available=1, active=9, limit=10)
+        with patch.object(r, "take_recycled_channel", return_value=None), self.assertRaises(RuntimeError):
+            r.acquire_channel(client, "t", stop_event=stop)

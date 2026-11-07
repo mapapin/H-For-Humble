@@ -392,7 +392,22 @@ def pool_release(channel_id: str, reusable: bool = True) -> None:
         lock.close()
 
 
-def acquire_channel(client: Client, tag: str, stop_event=None, on_wait=None, timeout_s: float = 2400) -> str | None:
+def _pause(seconds: float, stop_event=None, lock=None) -> None:
+    """Sleep while waiting for slots, without holding CHANNEL_LOCK (others must be able to start or release)."""
+    if lock is not None:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+    try:
+        if stop_event is not None:
+            stop_event.wait(seconds)
+        else:
+            time.sleep(seconds)
+    finally:
+        if lock is not None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+
+
+def acquire_channel(client: Client, tag: str, stop_event=None, on_wait=None, timeout_s: float = 2400,
+                    lock=None) -> str | None:
     """Slots for one run (under CHANNEL_LOCK): returns an idle recycled channel (1 more slot needed), or None for
     a fresh channel (2 slots). Waits while neither is possible."""
     deadline = time.monotonic() + timeout_s
@@ -415,10 +430,7 @@ def acquire_channel(client: Client, tag: str, stop_event=None, on_wait=None, tim
                 on_wait(quota)
             except Exception:
                 pass
-        if stop_event is not None:
-            stop_event.wait(10)
-        else:
-            time.sleep(10)
+        _pause(10, stop_event, lock)
 
 
 def channel_status(channel_id: str | None) -> str | None:
@@ -434,7 +446,7 @@ def channel_status(channel_id: str | None) -> str | None:
 
 
 def wait_for_slots(client: Client, needed: int, tag: str, timeout_s: float = 2400, stop_event=None,
-                   on_wait=None) -> None:
+                   on_wait=None, lock=None) -> None:
     """A self-hosted browser channel is itself a trajectory on H and holds a concurrency slot until its session
     ends (or ~30 min idle timeout), so a run needs 2 free slots. Wait for them instead of hammering the API."""
     deadline = time.monotonic() + timeout_s
@@ -452,10 +464,7 @@ def wait_for_slots(client: Client, needed: int, tag: str, timeout_s: float = 240
                 on_wait(quota)
             except Exception:
                 pass
-        if stop_event is not None:
-            stop_event.wait(20)
-        else:
-            time.sleep(20)
+        _pause(20, stop_event, lock)
 
 
 class BridgeThread:
@@ -553,16 +562,16 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
                 bridge, serving = lane.bridge, lane.serving
                 bridge.start_run(persona, vault, seed)
                 record["channel_id"] = bridge.session_id
-                wait_for_slots(client, needed=1, tag=tag, stop_event=stop_event, on_wait=on_wait)  # our channel holds its slot
+                wait_for_slots(client, needed=1, tag=tag, stop_event=stop_event, on_wait=on_wait, lock=lock)
             else:
                 channel_id = lane.channel_id if reuse else spec.get("channel_id")  # None = new channel
                 if channel_id is None and not reuse:
-                    channel_id = acquire_channel(client, tag, stop_event=stop_event, on_wait=on_wait)
+                    channel_id = acquire_channel(client, tag, stop_event=stop_event, on_wait=on_wait, lock=lock)
                     record["recycled_channel"] = channel_id is not None
                 else:
                     # a new channel and the agent session each take a slot; a pending channel already holds its own
                     wait_for_slots(client, needed=1 if channel_status(channel_id) == "pending" else 2, tag=tag,
-                                   stop_event=stop_event, on_wait=on_wait)
+                                   stop_event=stop_event, on_wait=on_wait, lock=lock)
                 record["channel_id"] = channel_id
                 # The SDK already retries channel setup using the same UUID. Creating new
                 # bridges here can leave extra channel trajectories holding quota slots.
