@@ -57,7 +57,7 @@ Expected answer €19.90. Each trap in the demo shop is described at the top of 
 | Hand tremor (±10 px) | ✅ €19.90 | 8 | $0.02 | Clicks drifted 1–9 px and still landed. **One run is not enough**: tremor needs several runs, as planned for the baseline |
 
 Each persona fails at the trap built for it, and the agent's own words name the cause well enough to map it to a
-WCAG criterion. The baseline succeeds every time (3 of 3 runs so far).
+WCAG criterion. The baseline succeeds every time (4 of 4 runs so far).
 
 ## What is de-risked
 
@@ -88,9 +88,12 @@ WCAG criterion. The baseline succeeds every time (3 of 3 runs so far).
    v1 PATCH accept the request and change nothing. Hence **lanes**: one channel per lane per audit, with one
    bridge kept alive and reused by every run (`runner.Lane`). Only the Chrome behind the bridge is swapped.
 3. **A `failed` channel delivers no commands to a new session.** Never reuse channel ids across audits.
-4. **A session waiting on a dead bridge can't be cancelled** until H's cleanup runs: the cancel is accepted
-   but the session stays `running`. Always keep the bridge alive until the session is terminal, and close
-   finished sessions (they end `idle`, holding a slot) with an explicit cancel.
+   **Never let two sessions share a channel**: a new session on a channel whose previous session is still
+   running freezes after its first screenshot.
+4. **A session waiting on a dead bridge can't be cancelled**, and its own `max_time_s` doesn't fire either: the
+   cancel is accepted but the session stays `running` (two of ours stayed stuck for more than 30 minutes, each
+   holding a slot). So never kill a bridge while its session runs. Close finished sessions (they end `idle`,
+   holding a slot) with an explicit cancel.
 5. **Opening a channel at capacity returns 429** ("rate-limited"), which looks like a rate limit but is the
    slot limit. Every retry counts.
 6. Agent names: lowercase letters, digits and hyphens only (no `_`).
