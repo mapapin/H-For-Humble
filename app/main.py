@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sqlite3
 import sys
@@ -41,6 +42,8 @@ async def lifespan(app):
 
 app = FastAPI(title="Humble", lifespan=lifespan)
 COOKIE = "humble_session"
+LIVE_IMAGE = re.compile(r"live(-[0-9])?\.png")
+FRAME_IMAGE = re.compile(r"[0-9]{3}\.jpg")
 TERMINAL = {"completed", "failed", "stopped"}
 
 
@@ -57,7 +60,7 @@ async def local_requests(request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-Frame-Options"] = "DENY"
-    if request.url.path.startswith("/api"):
+    if request.url.path.startswith("/api") and "cache-control" not in response.headers:
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -167,6 +170,8 @@ def settings(user=Depends(current_user)):
     except FileNotFoundError:
         chrome_ready = False
     return {"h_configured": bool(os.environ.get("HAI_API_KEY")), "chrome_ready": chrome_ready,
+            "linkup_configured": bool(os.environ.get("LINKUP_API_KEY")),
+            "devin_configured": bool(os.environ.get("DEVIN_API_KEY") and os.environ.get("DEVIN_ORG_ID")),
             "personas": [{"id": p.id, "label": p.label} for p in PERSONAS.values()]}
 
 
@@ -306,10 +311,31 @@ def projects(user=Depends(current_user)):
     return [store.serialize(row) for row in rows]
 
 
+class ResearchInput(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+
+
+@app.post("/api/research/journeys")
+def research_journeys(body: ResearchInput, user=Depends(current_user)):
+    """Linkup: what the site is, the journeys its visitors come for, and its declared accessibility."""
+    import research
+    if not research.available():
+        raise HTTPException(503, "Add LINKUP_API_KEY to .env and restart the server to get journey suggestions.")
+    if not research.is_public(body.url):
+        raise HTTPException(422, "Linkup searches the public web: it cannot see local or private sites. Write the journeys yourself.")
+    try:
+        result = research.suggest_journeys(body.url.strip())
+    except Exception:
+        raise HTTPException(502, "Linkup did not answer. Try again, or write the journeys yourself.")
+    if not result or not result.get("journeys"):
+        raise HTTPException(404, "Linkup found nothing about this website. Write the journeys yourself.")
+    return result
+
+
 @app.get("/api/audits")
 def audits(user=Depends(current_user)):
     with store.connect() as db:
-        rows = db.execute("SELECT id,project_id,name,url,status,created,config,summary,progress,error,finished FROM audits WHERE user_id=? ORDER BY created DESC", (user["id"],)).fetchall()
+        rows = db.execute("SELECT id,project_id,name,url,status,created,config,summary,progress,error,finished,scores,parent_id FROM audits WHERE user_id=? ORDER BY created DESC", (user["id"],)).fetchall()
     return [store.serialize(row) for row in rows]
 
 
@@ -458,12 +484,25 @@ def export(audit_id: str, user=Depends(current_user)):
 def artifact(audit_id: str, filename: str, user=Depends(current_user)):
     audit = owned_audit(audit_id, user)
     allowed = {r.get("final_screenshot") for r in audit["results"]}
-    if filename != "live.png" and filename not in allowed:
+    if not LIVE_IMAGE.fullmatch(filename) and filename not in allowed:
         raise HTTPException(404, "Image not found.")
     path = store.DATA / "audits" / audit_id / filename
     if Path(filename).name != filename or not filename.endswith(".png") or not path.is_file():
         raise HTTPException(404, "Image not found.")
     return FileResponse(path, media_type="image/png")
+
+
+@app.get("/api/audits/{audit_id}/frames/{tag}/{filename}")
+def frame(audit_id: str, tag: str, filename: str, user=Depends(current_user)):
+    """One replay frame: the screenshot an agent decided a step on."""
+    audit = owned_audit(audit_id, user)
+    tags = {r.get("tag") for r in audit["results"]}
+    if tag not in tags or not FRAME_IMAGE.fullmatch(filename):
+        raise HTTPException(404, "Frame not found.")
+    path = store.DATA / "audits" / audit_id / "frames" / tag / filename
+    if not path.is_file():
+        raise HTTPException(404, "Frame not found.")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/api/health")

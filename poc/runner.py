@@ -26,6 +26,8 @@ from hai_agents_local import SeleniumBrowserBridge
 
 from chrome import ChromeProcess, DevToolsController
 from personas import PERSONAS, Persona, build_instructions
+from replay import build_replay, fetch_events, latest_thought
+from scoring import run_metrics
 
 CHANNEL_LOCK = Path(tempfile.gettempdir()) / "h-audit-channel.lock"
 CHANNEL_SPACING_S = 3
@@ -151,7 +153,7 @@ class PersonaBridge(SeleniumBrowserBridge):
 
     def _dispatch(self, name: str, args: dict[str, Any]):  # runs on a worker thread per command
         p = self.persona
-        rec: dict[str, Any] = {"t": round(time.monotonic() - self.t0, 2), "cmd": name}
+        rec: dict[str, Any] = {"t": round(time.monotonic() - self.t0, 2), "ts": round(time.time(), 2), "cmd": name}
         log.info("command %s received (persona %s)", name, p.id)  # names only, never args (may hold secrets)
         if p.keyboard_only and name in MOUSE_ONLY_COMMANDS:
             rec["blocked"] = True
@@ -172,6 +174,7 @@ class PersonaBridge(SeleniumBrowserBridge):
                 return None, str(exc)
         if name in POINTER_COMMANDS and "x" in args and "y" in args:
             args = dict(args)
+            rec["xy"] = [args["x"], args["y"]]  # where the agent aimed, in screenshot px
             if p.click_jitter_px:
                 dx = self.rng.randint(-p.click_jitter_px, p.click_jitter_px)
                 dy = self.rng.randint(-p.click_jitter_px, p.click_jitter_px)
@@ -473,8 +476,11 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
             on_event({"session_id": handle.id, "agent_view_url": record["agent_view_url"],
                       "message": "H session connected. The agent is navigating the website."})
 
+        live_name = spec.get("live_name", "live.png")
+
         def observe():
             last_cancel = 0.0
+            feed_index, feed_events, feed_client, feed_steps = 0, [], None, 0
             while not monitor_done.wait(3):
                 if stop_event is not None and stop_event.is_set() and time.monotonic() - last_cancel > 15:
                     try:
@@ -486,13 +492,29 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
                     data = {"actions": len(bridge.actions),
                             "last_action": bridge.actions[-1]["cmd"] if bridge.actions else "Observing the page"}
                     try:
-                        temp_image = out_dir / "live.tmp.png"
+                        temp_image = out_dir / f"{live_name}.tmp"
                         temp_image.write_bytes(devtools.screenshot())
-                        temp_image.replace(out_dir / "live.png")
+                        temp_image.replace(out_dir / live_name)
                         data["preview_at"] = time.time()
                     except Exception:
                         pass
+                    try:  # the agent's latest thought and action, for live captions
+                        feed_client = feed_client or Client()
+                        new, feed_index = fetch_events(feed_client, handle.id, from_index=feed_index, max_pages=2)
+                        feed_events = (feed_events + new)[-60:]
+                        caption = latest_thought(feed_events)
+                        if caption:
+                            data.update(caption)
+                        feed_steps += sum(1 for e in new if (e.get("data") or {}).get("kind") == "policy_event")
+                        data["step"] = feed_steps
+                    except Exception:
+                        pass
                     on_event(data)
+            if feed_client is not None:
+                try:
+                    feed_client.close()
+                except Exception:
+                    pass
 
         if on_event is not None or stop_event is not None:
             monitor = threading.Thread(target=observe, daemon=True)
@@ -539,6 +561,13 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
         record["duration_s"] = round(time.monotonic() - started, 1)
         if bridge is not None:
             record["actions"] = [a for a in bridge.actions if a["cmd"] != "destroy"]
+        if handle is not None and spec.get("replay", True):
+            try:  # step-by-step replay from H's history: screenshots, thoughts, actions, persona effects
+                with Client() as replay_client:
+                    events, _ = fetch_events(replay_client, handle.id)
+                record["replay"] = build_replay(events, record.get("actions", []), out_dir, tag, api_key)
+            except Exception as exc:
+                record["replay_error"] = f"{type(exc).__name__}"
         # Each cleanup step on its own, so one failure never leaves a Chrome (and its port) behind.
         try:
             if lane is not None and lane.bridge is bridge and bridge is not None:
@@ -591,6 +620,7 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
         record["success"] = claimed and expected.lower() in str(rep.get("answer", "")).lower()
     else:
         record["success"] = claimed
+    record["metrics"] = run_metrics(record)
     (out_dir / f"{tag}.json").write_text(json.dumps(record, indent=2, default=str))
     print(f"[{tag}] done success={record['success']} steps={record.get('steps')} {record['duration_s']}s", flush=True)
     return record

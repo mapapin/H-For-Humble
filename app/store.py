@@ -62,12 +62,13 @@ def init():
         # Fix workflows: suggested fixes (patch + before/after images), auto-mode rounds, re-evaluation parent.
         columns = {row["name"] for row in db.execute("PRAGMA table_info(audits)")}
         for name, ddl in (("fixes", "TEXT NOT NULL DEFAULT '{}'"), ("rounds", "TEXT NOT NULL DEFAULT '[]'"),
-                          ("parent_id", "TEXT")):
+                          ("parent_id", "TEXT"), ("scores", "TEXT NOT NULL DEFAULT '{}'"),
+                          ("context", "TEXT NOT NULL DEFAULT '{}'")):
             if name not in columns:
                 db.execute(f"ALTER TABLE audits ADD COLUMN {name} {ddl}")
 
 
-JSON_FIELDS = ("results", "summary", "progress", "fixes", "rounds")
+JSON_FIELDS = ("results", "summary", "progress", "fixes", "rounds", "scores", "context")
 
 
 def event(audit_id, kind, message):
@@ -77,7 +78,7 @@ def event(audit_id, kind, message):
 
 
 def update(audit_id, **fields):
-    allowed = {"status", "results", "summary", "progress", "error", "finished", "fixes", "rounds"}
+    allowed = {"status", "results", "summary", "progress", "error", "finished", "fixes", "rounds", "scores", "context"}
     assert fields and set(fields) <= allowed
     values = [json.dumps(v) if k in JSON_FIELDS else v for k, v in fields.items()]
     with connect() as db:

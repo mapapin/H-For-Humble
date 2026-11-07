@@ -84,14 +84,58 @@ class WorkerTests(unittest.TestCase):
             self.assertIs(run.call_args_list[0].kwargs["lane"], run.call_args_list[1].kwargs["lane"])
             lane.return_value.close.assert_called_once()
 
-    def test_technical_failure_does_not_start_more_runs(self):
+    def test_technical_failures_are_retried_once_then_stop_the_audit(self):
         messages = queue.Queue()
+        config = self.config()
+        config["personas"] = ["baseline", "keyboard_only", "tremor"]
         with patch("hai_agents.Client") as client, patch("runner.Lane"), patch("runner.run_one", return_value={"status": "harness_error", "success": False}) as run:
             client.return_value.__enter__.return_value.sessions.get_session_quota.return_value = SimpleNamespace(available=3, active=0, limit=3)
-            audit_worker("test-audit", self.config(), {}, "/unused", messages, threading.Event(), threading.Event())
-            self.assertEqual(run.call_count, 1)
+            audit_worker("test-audit", config, {}, "/unused", messages, threading.Event(), threading.Event())
+            self.assertEqual(run.call_count, 4)  # 2 cases x (run + one retry); the third case never starts
+            self.assertEqual(run.call_args_list[1].args[0]["retry"], 1)
             kinds = [messages.get()["kind"] for _ in range(messages.qsize())]
             self.assertEqual(kinds[-1], "failed")
+
+    def test_perspectives_run_in_parallel_lanes(self):
+        messages = queue.Queue()
+        config = self.config()
+        config["personas"] = ["baseline", "keyboard_only", "tremor", "low_vision", "color_blind"]
+        started, peak, lock = [], [0], threading.Lock()
+        active = [0]
+
+        def fake_run(spec, lane=None, on_event=None, stop_event=None):
+            with lock:
+                active[0] += 1
+                peak[0] = max(peak[0], active[0])
+                started.append((spec["persona"], spec["port"], spec["live_name"]))
+            import time as _t
+            _t.sleep(0.2)
+            with lock:
+                active[0] -= 1
+            return {"status": "completed", "success": True, "persona": spec["persona"], "task": spec["task"]["id"],
+                    "run": spec["run_index"], "tag": spec["persona"]}
+
+        with tempfile.TemporaryDirectory() as folder, patch("hai_agents.Client") as client, \
+                patch("runner.Lane", side_effect=lambda i, port: SimpleNamespace(port=port, close=lambda: True)), \
+                patch("runner.run_one", side_effect=fake_run), patch("app.jobs.LANE_STAGGER_S", 0):
+            client.return_value.__enter__.return_value.sessions.get_session_quota.return_value = SimpleNamespace(available=10, active=0, limit=10)
+            audit_worker("test-audit", config, {}, folder, messages, threading.Event(), threading.Event())
+        self.assertEqual(len(started), 5)
+        self.assertEqual(len({port for _, port, _ in started}), 5)  # one lane (port) per perspective
+        self.assertEqual(len({name for _, _, name in started}), 5)  # one live preview per lane
+        self.assertGreater(peak[0], 1)
+        kinds = [messages.get()["kind"] for _ in range(messages.qsize())]
+        self.assertEqual(kinds[-1], "completed")
+
+    def test_lanes_are_limited_by_free_slots(self):
+        messages = queue.Queue()
+        config = self.config()
+        config["personas"] = ["baseline", "keyboard_only", "tremor", "low_vision", "color_blind"]
+        with tempfile.TemporaryDirectory() as folder, patch("hai_agents.Client") as client, patch("runner.Lane") as lane, \
+                patch("runner.run_one", return_value={"status": "completed", "success": True}), patch("app.jobs.LANE_STAGGER_S", 0):
+            client.return_value.__enter__.return_value.sessions.get_session_quota.return_value = SimpleNamespace(available=5, active=5, limit=10)
+            audit_worker("test-audit", config, {}, folder, messages, threading.Event(), threading.Event())
+            self.assertEqual(lane.call_count, 2)  # 5 free slots -> 2 lanes of 2 slots
 
     def test_stopped_queue_does_not_launch_an_agent(self):
         stopped = threading.Event()

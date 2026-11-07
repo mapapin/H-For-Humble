@@ -58,7 +58,8 @@ def patch_script(fixes: list[dict]) -> str:
     """One self-contained script applying the fixes on every page: CSS as a <style>, JS bodies after the DOM is
     ready, each guarded so one broken fix does not stop the others. Fixes only run on their own page path."""
     items = [
-        {"id": f["id"], "path": urlparse(f.get("page_url") or "").path or "", "css": f.get("css") or "",
+        {"id": f["id"], "path": "" if f.get("scope") == "site" else urlparse(f.get("page_url") or "").path or "",
+         "css": f.get("css") or "",
          "js": f.get("js") or ""}
         for f in fixes
     ]
@@ -130,7 +131,14 @@ class CannedFixer:
     source = "canned"
 
     def __init__(self, path: str | Path) -> None:
-        self.patch = json.loads(Path(path).read_text())
+        """path: one fixes JSON file, or a folder of them (one per known site; matched by host and port)."""
+        path = Path(path)
+        files = sorted(path.glob("*.json")) if path.is_dir() else [path]
+        patches = [json.loads(f.read_text()) for f in files]
+        self.patch = {"summary": " ".join(p.get("summary", "") for p in patches[:1]),
+                      "fixes": [f for p in patches for f in p.get("fixes", [])],
+                      "summaries": {urlparse(p["fixes"][0]["page_url"]).netloc: p.get("summary", "")
+                                    for p in patches if p.get("fixes")}}
 
     def generate(self, records: list[dict], rows: list[dict], base_dir: str | Path, site: dict,
                  previous: dict | None = None) -> dict:
@@ -139,7 +147,8 @@ class CannedFixer:
         origin = urlparse(site["start_url"]).netloc  # canned fixes are written for one site only
         new = [f for f in self.patch["fixes"] if f["id"] not in done and failing & set(f["personas"])
                and urlparse(f["page_url"]).netloc == origin]
-        return {"source": self.source, "summary": self.patch.get("summary", ""), "fixes": new}
+        summary = self.patch.get("summaries", {}).get(origin, self.patch.get("summary", ""))
+        return {"source": self.source, "summary": summary, "fixes": new}
 
 
 class DevinFixer:
@@ -221,9 +230,14 @@ def make_fixer(kind: str, canned_path: str | Path | None = None):
         return DevinFixer()
     if kind == "canned":
         return CannedFixer(canned_path or Path(__file__).parent / "fixes" / "demo_shop.json")
-    if kind == "auto":  # Devin when configured, else the canned stand-in
-        return DevinFixer() if os.environ.get("DEVIN_API_KEY") and os.environ.get("DEVIN_ORG_ID") \
-            else make_fixer("canned", canned_path)
+    if kind == "rules":
+        from autofix import RuleFixer
+        return RuleFixer()
+    if kind == "auto":  # Devin when configured, else hand-written fixes for known sites + rules for any site
+        if os.environ.get("DEVIN_API_KEY") and os.environ.get("DEVIN_ORG_ID"):
+            return DevinFixer()
+        from autofix import CompositeFixer
+        return CompositeFixer(CannedFixer(canned_path or Path(__file__).parent / "fixes"))
     raise ValueError(f"unknown fixer {kind!r}")
 
 

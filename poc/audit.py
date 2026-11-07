@@ -95,7 +95,8 @@ def summarize(records: list[dict]) -> list[dict]:
             "success_rate": round(sum(bool(r.get("success")) for r in ok) / len(ok), 2) if ok else None,
             "mean_steps": round(statistics.mean(steps), 1) if steps else None,
             "mean_actions": round(statistics.mean(acts), 1) if acts else None,
-            "mean_agent_time_s": round(statistics.mean(r.get("agent_duration_s") or r["duration_s"] for r in ok), 1) if ok else None,
+            "mean_agent_time_s": round(statistics.mean(times), 1) if (times := [t for r in ok if isinstance(
+                t := r.get("agent_duration_s") or r.get("duration_s"), (int, float))]) else None,
             "total_cost_usd": round(sum(r.get("cost_usd") or 0 for r in runs), 4),
             "blocked_or_failed_actions": sum(
                 1 for r in ok for a in r.get("actions", []) if a.get("blocked") or a.get("error")

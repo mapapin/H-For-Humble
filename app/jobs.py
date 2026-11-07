@@ -1,11 +1,13 @@
-"""One server-wide audit at a time; one persistent H browser channel per audit."""
+"""One server-wide audit at a time; its cases run in parallel lanes (one H browser channel each)."""
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
 import queue
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 
 from . import store
@@ -13,27 +15,74 @@ from . import store
 POC = store.ROOT / "poc"
 sys.path.insert(0, str(POC))
 from audit import summarize
+from scoring import scorecard
+
+
+MAX_LANES = int(os.environ.get("HUMBLE_MAX_LANES", "5"))
+BASE_PORT = 9400
+LANE_STAGGER_S = 1.5  # between browser startups
+SANITIZED_KEYS = ("error", "status_error", "screenshot_error", "snapshot_error", "cleanup_error")
+
+
+class AnyEvent:
+    """Set when any of its events is set (user stop, or the worker's own circuit breaker)."""
+
+    def __init__(self, *events):
+        self.events = events
+
+    def is_set(self):
+        return any(e.is_set() for e in self.events)
+
+    def wait(self, timeout=None):
+        deadline = time.monotonic() + (timeout or 0)
+        while not self.is_set():
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return False
+            time.sleep(min(0.25, left))
+        return True
 
 
 def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paused):
-    """Spawned process: credentials only arrive through process memory, never CLI or SQLite."""
+    """Spawned process: credentials only arrive through process memory, never CLI or SQLite.
+
+    Runs go in parallel lanes, one H browser channel each (2 H slots per lane: the channel + the agent session),
+    as many lanes as free slots allow, up to one per case and MAX_LANES. Cases are queued perspective-first, so the
+    first wave runs every perspective side by side."""
     sys.path.insert(0, str(POC))
     from hai_agents import Client
     from runner import Lane, run_one
     from fixes import make_fixer, merge_patches, patch_script
     from pipeline import passes, persona_rates, score, suggest_fixes
     from render import build_comparisons
+    from scoring import scorecard
 
     terminal_message = None
+    lock = threading.Lock()
 
     def emit(kind, **data):
         nonlocal terminal_message
         if kind in {"completed", "stopped", "failed"}:
-            terminal_message = {"kind": kind, **data}
+            with lock:
+                terminal_message = terminal_message or {"kind": kind, **data}
         else:
             messages.put({"kind": kind, **data})
 
-    lane = None
+    abort = threading.Event()
+    halt = AnyEvent(stopped, abort)
+    opened_lanes = []
+
+    def research():  # Linkup: declared accessibility compliance + legal context, shown next to the measured scores
+        try:
+            from research import site_context
+            context = site_context(config["url"])
+            if context:
+                emit("context", context=context)
+        except Exception:
+            pass
+
+    if not config.get("patch"):
+        threading.Thread(target=research, daemon=True, name="research").start()
     try:
         with Client() as client:
             quota = client.sessions.get_session_quota()
@@ -41,62 +90,106 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
             emit("failed", message=f"H has {quota.active}/{quota.limit} slots in use. This audit needs 2 free slots. "
                  "Wait for previous browser channels to be released, then try again.")
             return
-        lane = Lane(0, port=9400)
         site = {"start_url": config["url"], "auth": credentials}
         # standard: one round, then suggested fixes. auto: audit -> fix -> re-audit until every perspective passes.
         # A re-evaluation is a standard audit whose config carries the patch to inject in every page.
         auto = config.get("mode") == "auto"
         max_rounds = int(config.get("max_rounds", 2)) if auto else 0
         patch = config.get("patch")
-        fixer = make_fixer("auto")  # Devin when DEVIN_API_KEY/DEVIN_ORG_ID are set, else the demo stand-in
-        completed, first_round, round_records, rows = 0, None, [], []
+        fixer = make_fixer("auto")  # Devin when DEVIN_API_KEY/DEVIN_ORG_ID are set, else rules + demo stand-in
+        state = {"completed": 0, "failed_cases": 0}
+        first_round, round_records, rows = None, [], []
+        personas, tasks, reps = config["personas"], config["tasks"], config["repetitions"]
+        order = {(t["id"], p, r): i for i, (r, t, p) in enumerate((r, t, p) for r in range(reps) for t in tasks for p in personas)}
+        wanted_lanes = int(config.get("parallel") or MAX_LANES)
         for rnd in range(max_rounds + 1):
             script = patch_script(patch["fixes"]) if patch and patch.get("fixes") else None
             if rnd:
                 emit("round_started", round=rnd, message=f"Round {rnd + 1}: re-evaluating every perspective with "
                      f"{len(patch['fixes'])} suggested fixes applied.")
+            jobs = queue.Queue()
+            for run in range(reps):
+                for task in tasks:
+                    for persona in personas:
+                        jobs.put((task, persona, run))
+            available = quota.available if quota.available is not None else 2 * MAX_LANES
+            if rnd:
+                try:
+                    with Client() as client:
+                        available = client.sessions.get_session_quota().available or 2
+                except Exception:
+                    available = 2
+            n_lanes = max(1, min(jobs.qsize(), wanted_lanes, MAX_LANES, available // 2))
+            emit("progress", message=f"Running {jobs.qsize()} cases on {n_lanes} parallel browser"
+                 f"{'s' if n_lanes > 1 else ''} ({available} H slots free).", lanes_total=n_lanes)
             round_records = []
-            for task in config["tasks"]:
-                for persona in config["personas"]:
-                    for run in range(config["repetitions"]):
-                        while paused.is_set() and not stopped.wait(0.25):
-                            pass
-                        if stopped.is_set():
-                            emit("stopped")
-                            return
-                        emit("run_started", persona=persona, task=task["id"], run=run, round=rnd,
-                             completed=completed, message=f"Starting {persona.replace('_', ' ')} · {task['title']}")
-                        spec = {
-                            "persona": persona, "task": task, "site": site, "run_index": run,
-                            "port": lane.port, "out_dir": out_dir, "headless": True,
-                            "group_id": f"humble-{audit_id}", "login_mode": "tool",
-                            "patch_script": script, "round": rnd,
-                        }
-                        record = run_one(spec, lane=lane, on_event=lambda data: emit("progress", **data),
-                                         stop_event=stopped)
-                        if record.get("stalled") and record.get("session_closed") and not stopped.is_set():
-                            emit("progress", message="H session stalled. Retrying once with a fresh browser channel.")
-                            previous = record.get("session_id")
-                            record = run_one({**spec, "retry": 1}, lane=lane,
-                                             on_event=lambda data: emit("progress", **data), stop_event=stopped)
-                            record["retry_of"] = previous
-                        # Never persist third-party exception text: it can contain request headers or credentials.
-                        for key in ("error", "status_error", "screenshot_error", "snapshot_error"):
-                            if record.get(key):
-                                record[key] = "The browser or H session encountered a technical error. Check the local server terminal."
-                        record["round"] = rnd
+
+            def lane_loop(idx, rnd=rnd, script=script, jobs=jobs, round_records=round_records):
+                lane = Lane(idx, port=BASE_PORT + idx)
+                with lock:
+                    opened_lanes.append(lane)
+                while not halt.is_set():
+                    while paused.is_set() and not halt.wait(0.25):
+                        pass
+                    if halt.is_set():
+                        return
+                    try:
+                        task, persona, run = jobs.get_nowait()
+                    except queue.Empty:
+                        return
+                    emit("run_started", lane=idx, persona=persona, task=task["id"], run=run, round=rnd,
+                         completed=state["completed"], message=f"Starting {persona.replace('_', ' ')} · {task['title']}")
+                    spec = {
+                        "persona": persona, "task": task, "site": site, "run_index": run,
+                        "port": lane.port, "out_dir": out_dir, "headless": True,
+                        "group_id": f"humble-{audit_id}", "login_mode": "tool",
+                        "patch_script": script, "round": rnd, "live_name": f"live-{idx}.png",
+                    }
+                    on_event = lambda data, idx=idx: emit("progress", lane=idx, **data)
+                    record = run_one(spec, lane=lane, on_event=on_event, stop_event=halt)
+                    if record.get("status") == "harness_error" and not halt.is_set() and (
+                            record.get("session_closed") is not False):
+                        # One retry on a fresh browser channel: stalls and setup errors are usually transient.
+                        emit("progress", lane=idx, message=f"{persona.replace('_', ' ').capitalize()}: technical error, "
+                             "retrying once with a fresh browser channel.")
+                        previous = record.get("session_id")
+                        record = run_one({**spec, "retry": 1}, lane=lane, on_event=on_event, stop_event=halt)
+                        record["retry_of"] = previous
+                    # Never persist third-party exception text: it can contain request headers or credentials.
+                    for key in SANITIZED_KEYS:
+                        if record.get(key):
+                            record[key] = "The browser or H session encountered a technical error. Check the local server terminal."
+                    record.update(round=rnd, lane=idx)
+                    with lock:
                         round_records.append(record)
-                        completed += 1
-                        emit("run_finished", record=record, completed=completed)
-                        if stopped.is_set():
-                            emit("stopped")
-                            return
-                        if record.get("status") == "harness_error":
-                            emit("failed", message="The browser connection failed. Remaining runs were not started to avoid occupying more H slots.")
-                            return
+                        state["completed"] += 1
+                        if record.get("status") == "harness_error" and not halt.is_set():
+                            state["failed_cases"] += 1
+                            if state["failed_cases"] >= 2:
+                                abort.set()  # something is wrong with Chrome, the network or H: stop using slots
+                        completed = state["completed"]
+                    emit("run_finished", lane=idx, record=record, completed=completed)
+
+            threads = [threading.Thread(target=lane_loop, args=(i,), daemon=True, name=f"lane-{i}") for i in range(n_lanes)]
+            for i, t in enumerate(threads):
+                t.start()
+                if i + 1 < len(threads):
+                    time.sleep(LANE_STAGGER_S)
+            for t in threads:
+                t.join()
+            if stopped.is_set():
+                emit("stopped")
+                return
+            if abort.is_set():
+                emit("failed", message="Two cases failed for technical reasons (browser or H connection). The audit "
+                     "stopped to avoid occupying more H slots. Results collected so far are saved.")
+                return
+            round_records.sort(key=lambda r: order.get((r.get("task"), r.get("persona"), r.get("run")), 0))
             rows = summarize([r for r in round_records if "persona" in r and "task" in r])
             first_round = first_round or round_records
-            entry = {"round": rnd, "summary": rows, "score": score(rows), "rates": persona_rates(rows),
+            card = scorecard(round_records, personas)
+            entry = {"round": rnd, "summary": rows, "score": card["score"], "completion_score": score(rows),
+                     "rates": persona_rates(rows), "scores": {k: v["score"] for k, v in card["perspectives"].items()},
                      "fixes_applied": [f["id"] for f in (patch or {}).get("fixes", [])], "passed": passes(rows)}
             if not auto or entry["passed"] or rnd == max_rounds:
                 if auto:
@@ -130,18 +223,22 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
             emit("progress", message=f"Fix suggestions are unavailable ({type(exc).__name__}). The audit results are complete.")
         emit("completed")
     except Exception as exc:
+        traceback.print_exc()
         emit("failed", message=f"Unable to run the audit ({type(exc).__name__}). Check Chrome, network access and your H API key.")
     finally:
         credentials.clear()
-        if lane is not None:
-            emit("progress", message="Closing H sessions and browser channel.")
-            try:
-                if lane.close() is False:
-                    messages.put({"kind": "cleanup_warning", "message":
-                        "H has not confirmed browser channel closure. A slot may remain occupied until H cleanup."})
-            except Exception:
+        if opened_lanes:
+            emit("progress", message="Closing H sessions and browser channels.")
+            unconfirmed = 0
+            for lane in opened_lanes:
+                try:
+                    if lane.close() is False:
+                        unconfirmed += 1
+                except Exception:
+                    unconfirmed += 1
+            if unconfirmed:
                 messages.put({"kind": "cleanup_warning", "message":
-                    "Unable to verify H browser channel closure. Check H before starting another audit."})
+                    "H has not confirmed every browser channel closure. A slot may remain occupied until H cleanup."})
         if terminal_message is not None:
             messages.put(terminal_message)
 
@@ -168,15 +265,19 @@ class JobManager:
             except Exception:
                 self.current = None
                 raise
-            threading.Thread(target=self._watch, args=(audit_id, process, messages), daemon=True).start()
+            threading.Thread(target=self._watch, args=(audit_id, process, messages, config["personas"]), daemon=True).start()
             return True
 
-    def _watch(self, audit_id, process, messages):
-        records, progress, rounds = [], {}, []
+    def _watch(self, audit_id, process, messages, personas=None):
+        records, progress, rounds = [], {"completed": 0, "lanes": {}}, []
         terminal = False
+
+        def label(persona):
+            return (persona or "").replace("_", " ").capitalize()
+
         try:
             store.update(audit_id, status="running")
-            store.event(audit_id, "started", "Audit started. Preparing a dedicated browser.")
+            store.event(audit_id, "started", "Audit started. Preparing dedicated browsers.")
             while True:
                 try:
                     item = messages.get(timeout=0.5)
@@ -185,9 +286,12 @@ class JobManager:
                         continue
                     break
                 kind = item.pop("kind")
+                lane = item.pop("lane", None)
+                lanes = progress["lanes"]
                 if kind == "round_started":
                     records = []  # results/summary show the current round; earlier rounds live in `rounds`
-                    store.update(audit_id, results=records, summary=[])
+                    progress["lanes"] = {}
+                    store.update(audit_id, results=records, summary=[], scores={}, progress=progress)
                     store.event(audit_id, "progress", item["message"])
                 elif kind == "round_finished":
                     rounds.append(item["entry"])
@@ -196,28 +300,54 @@ class JobManager:
                     store.event(audit_id, "progress", f"Round {e['round'] + 1}: score {e['score']}/100"
                                 + (" · every perspective passed." if e["passed"] else
                                    f" · {len(e.get('new_fixes', []))} new fixes suggested." if e.get("new_fixes") else "."))
+                elif kind == "context":
+                    store.update(audit_id, context=item["context"])
+                    store.event(audit_id, "progress", "Linkup found the site's declared accessibility context.")
                 elif kind == "fixes":
                     store.update(audit_id, fixes=item["fixes"])
                     store.event(audit_id, "progress", f"{len(item['fixes']['patch']['fixes'])} suggested fixes ready, "
                                 "with before/after images.")
-                elif kind in {"run_started", "progress"}:
-                    if kind == "run_started":
-                        progress = item
+                elif kind == "run_started":
+                    lanes[str(lane)] = {k: item[k] for k in ("persona", "task", "run", "round") if k in item}
+                    lanes[str(lane)].update(state="starting", started_at=time.time())
+                    progress.update({k: item[k] for k in ("persona", "task", "run") if k in item})  # latest case
+                    store.update(audit_id, progress=progress)
+                    store.event(audit_id, kind, item["message"])
+                elif kind == "progress":
+                    message = item.pop("message", None)
+                    if lane is not None and str(lane) in lanes:
+                        current = lanes[str(lane)]
+                        current.update(item)
+                        if item.get("session_id"):
+                            current["state"] = "running"
+                        if message:
+                            current["message"] = message
+                        if message:
+                            store.event(audit_id, kind, f"{label(current.get('persona'))}: {message}")
                     else:
                         progress.update(item)
+                        if message:
+                            store.event(audit_id, kind, message)
                     store.update(audit_id, progress=progress)
-                    if item.get("message"):
-                        store.event(audit_id, kind, item["message"])
                 elif kind == "run_finished":
-                    records.append(item["record"])
-                    progress["completed"] = item["completed"]
-                    store.update(audit_id, results=records, summary=summarize(records), progress=progress)
                     r = item["record"]
-                    store.event(audit_id, kind, f"{r['persona'].replace('_', ' ').capitalize()}: "
-                                + ("journey completed" if r.get("success") else "journey not completed"))
+                    records.append(r)
+                    progress["completed"] = item["completed"]
+                    if lane is not None:
+                        lanes[str(lane)] = {**lanes.get(str(lane), {}), "state": "finished", "tag": r.get("tag"),
+                                            "success": bool(r.get("success")), "error": r.get("status") == "harness_error",
+                                            "steps": r.get("steps"), "finished_at": time.time()}
+                    store.update(audit_id, results=records, summary=summarize(records),
+                                 scores=scorecard(records, personas), progress=progress)
+                    store.event(audit_id, kind, f"{label(r.get('persona'))}: "
+                                + ("technical error" if r.get("status") == "harness_error" else
+                                   "journey completed" if r.get("success") else "journey not completed"))
                 elif kind in {"completed", "stopped", "failed"}:
                     terminal = True
-                    store.update(audit_id, status=kind, finished=time.time(), error=item.get("message"))
+                    for current in lanes.values():
+                        if current.get("state") not in {"finished"}:
+                            current["state"] = "cancelled"
+                    store.update(audit_id, status=kind, finished=time.time(), error=item.get("message"), progress=progress)
                     store.event(audit_id, kind, item.get("message") or
                                 ("Audit completed. Your report is ready." if kind == "completed" else "Audit stopped. Partial results have been saved."))
                 elif kind == "cleanup_warning":
