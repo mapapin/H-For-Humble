@@ -47,6 +47,27 @@ def _listening(port: int) -> bool:
         return False
 
 
+def _kill_leftover_audit_chrome(port: int) -> bool:
+    """Kill a Chrome left on this port by an earlier audit run (only ours: our flag + our profile prefix)."""
+    killed = False
+    for proc_dir in Path("/proc").iterdir():
+        if not proc_dir.name.isdigit():
+            continue
+        try:
+            args = (proc_dir / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if f"--remote-debugging-port={port}".encode() in args and any(
+            a.startswith(b"--user-data-dir=") and b"audit-chrome-" in a for a in args
+        ):
+            try:
+                os.kill(int(proc_dir.name), 9)
+                killed = True
+            except OSError:
+                pass
+    return killed
+
+
 class ChromeProcess:
     def __init__(self, port: int, persona: Persona, headless: bool = True) -> None:
         self.port = port
@@ -72,7 +93,9 @@ class ChromeProcess:
         deadline = time.monotonic() + 10  # a lane reuses its port: give the previous run's Chrome time to exit
         while _listening(port):
             if time.monotonic() > deadline:
-                raise RuntimeError(f"port {port} is already used by another Chrome")
+                if not _kill_leftover_audit_chrome(port):
+                    raise RuntimeError(f"port {port} is already used by another Chrome")
+                deadline = time.monotonic() + 10
             time.sleep(0.3)
         self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.monotonic() + 20

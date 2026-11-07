@@ -52,11 +52,26 @@ def _run_lane(lane: int, specs: list[dict]) -> list[dict]:
     """One lane = one process and one stable H browser channel; its runs go one after another on that channel."""
     sys.path.insert(0, str(HERE))
     load_dotenv(HERE.parent / ".env")
+    import logging
+
     from runner import Lane, run_one
 
-    lane_obj = Lane(lane, port=specs[0]["port"])
+    # Every command the bridge receives (names only) + the SDK's bridge logs, to diagnose stalls.
+    logging.basicConfig(filename=str(Path(specs[0]["out_dir"]) / f"lane-{lane}.log"), level=logging.INFO,
+                        format="%(asctime)s %(threadName)s %(name)s %(levelname)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    lane_obj = Lane(lane, port=specs[0]["port"], reuse_channel=specs[0].get("reuse_channel", False))
     try:
-        return [run_one(spec, lane=lane_obj) for spec in specs]
+        records = []
+        for spec in specs:
+            rec = run_one(spec, lane=lane_obj)
+            if rec.get("stalled"):  # H stopped sending commands: retry once on a fresh channel
+                print(f"[{rec['tag']}] stalled; retrying once on a fresh channel", flush=True)
+                retry = run_one({**spec, "retry": 1}, lane=lane_obj)
+                retry["retry_of"] = rec.get("session_id")
+                rec = retry
+            records.append(rec)
+        return records
     finally:
         lane_obj.close()
 
@@ -138,9 +153,11 @@ def main() -> None:
     ap.add_argument("--personas", default="baseline,low_vision,color_blind,tremor,keyboard_only")
     ap.add_argument("--tasks", default="", help="comma-separated task ids (default: all)")
     ap.add_argument("--runs", type=int, default=1)
-    ap.add_argument("--lanes", type=int, default=1,
-                    help="parallel lanes; each needs 2 H session slots (its browser channel + the agent session). "
-                         "Free plan (3 slots): 1. Builder (10): up to 5.")
+    ap.add_argument("--lanes", type=int, default=3,
+                    help="parallel lanes; each run needs 2 H session slots (its browser channel + the agent session), "
+                         "and a used channel keeps its slot until H's cleanup. With 10 slots, 3 lanes.")
+    ap.add_argument("--reuse-channel", action="store_true",
+                    help="reuse one browser channel per lane (saves slots, but H sometimes stalls the next session)")
     ap.add_argument("--model", default="")
     ap.add_argument("--headed", action="store_true", help="show the Chrome windows")
     ap.add_argument("--base-port", type=int, default=9400)
@@ -169,15 +186,18 @@ def main() -> None:
                 specs.append({
                     "persona": persona, "task": task, "site": preset["site"], "run_index": i,
                     "port": args.base_port + len(specs), "out_dir": str(out_dir), "headless": not args.headed,
-                    "model": args.model or None, "group_id": f"audit-{stamp}", "login_mode": args.login_mode,
+                    "model": args.model or None, "group_id": f"audit-{stamp}", "login_mode": args.login_mode, "reuse_channel": args.reuse_channel,
                 })
     lanes = [specs[i::args.lanes] for i in range(args.lanes)]
     print(f"{len(specs)} runs on {args.lanes} lane(s), output {out_dir}", flush=True)
     records = []
     with ProcessPoolExecutor(max_workers=args.lanes, mp_context=mp.get_context("spawn")) as pool:
-        futures = [pool.submit(_run_lane, i, lane) for i, lane in enumerate(lanes) if lane]
+        futures = {pool.submit(_run_lane, i, lane): i for i, lane in enumerate(lanes) if lane}
         for fut in as_completed(futures):
-            records.extend(fut.result())
+            try:
+                records.extend(fut.result())
+            except Exception as exc:  # one broken lane must not lose the other lanes' results
+                print(f"lane {futures[fut]} crashed: {type(exc).__name__}: {exc}", flush=True)
     rows = summarize(records)
     (out_dir / "results.json").write_text(json.dumps({"summary": rows, "runs": records}, indent=2, default=str))
     report = write_report(out_dir, preset, records, rows)

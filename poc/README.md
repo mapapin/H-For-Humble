@@ -7,8 +7,8 @@ we compare how each persona does against the baseline.
 ## How it works
 
 ```
-audit.py ── for each (task × persona × run) ──► runner.run_one()  (one process per run)
-                                                 │
+audit.py ── runs spread over N lanes (one process each, in parallel) ──► runner.run_one() per run
+            each run: fresh Chrome + fresh bridge + fresh H channel   │
    1. Chrome for Testing, own profile, own port  │  chrome.ChromeProcess
       zoom = smaller window + device scale factor│  (CSS viewport shrinks like Ctrl+, media queries react)
    2. DevTools connection kept for the whole run │  chrome.DevToolsController
@@ -35,8 +35,11 @@ headers.
 # Demo shop (deliberately inaccessible), with header auth on:
 DEMO_TOKEN=tok123 .venv/bin/python poc/demo_site/server.py --port 8765 &
 # Audit (HAI_API_KEY from .env):
-DEMO_TOKEN=tok123 .venv/bin/python poc/audit.py --preset poc/presets/demo_shop.yaml --runs 1 --lanes 1
+DEMO_TOKEN=tok123 .venv/bin/python poc/audit.py --preset poc/presets/demo_shop.yaml --runs 2 --lanes 3
 ```
+
+`--lanes`: parallel runs. Each run needs 2 H session slots, and a used channel keeps its slot until H's cleanup,
+so with our 10 slots use 3 lanes (the runner waits for free slots on its own). On the free plan (3 slots), use 1.
 
 Output: `poc/runs/<timestamp>/report.html` (table + one card per run with obstacles, final screenshot as the persona
 saw it, and an Agent View replay link) and `results.json`.
@@ -47,17 +50,19 @@ customer's own tasks, with an optional expected answer for automatic grading.
 ## Results (2026-11-07, demo shop, task "buy an in-stock blue mug and report the checkout total")
 
 Expected answer €19.90. Each trap in the demo shop is described at the top of `demo_site/server.py`.
+Reference audit: `--runs 2 --lanes 3`, 10 sessions, 11 minutes, $0.47 total. All 10 runs went through our bridge:
+no stall, no harness error, no session left running.
 
-| Persona | Result | Steps | Cost | What the agent reported |
-|---|---|---|---|---|
-| Baseline | ✅ €19.90 | 8 | $0.02 | Picked the in-stock "Large" mug, no obstacles |
-| Colour blind (deuteranopia) | ❌ €16.90 | 8 | $0.02 | "Stock status only by coloured dots… indistinguishable to a deuteranope", so it ordered the backordered mug (WCAG 1.4.1) |
-| Low vision (200% zoom + blur) | ❌ blocked | 26–35 | $0.09 | "Checkout button off-screen to the right at 200% zoom": scroll, arrows and Tab all failed (WCAG 1.4.10 reflow). Misread "€" as "£" through the blur |
-| Keyboard only | ❌ blocked | 20 | $0.07 | "Proceed to checkout is not in the Tab order, likely a `<div>` with onclick" (WCAG 2.1.1). Did everything else with Tab/Enter; its one mouse attempt was blocked by our bridge |
-| Hand tremor (±10 px) | ✅ €19.90 | 8 | $0.02 | Clicks drifted 1–9 px and still landed. **One run is not enough**: tremor needs several runs, as planned for the baseline |
+| Persona | Success (2 runs) | Mean steps (×baseline) | What the agent reported |
+|---|---|---|---|
+| Baseline | ✅ 2/2 (€19.90) | 8 (×1) | Picked the in-stock "Large" mug, no obstacles |
+| Colour blind (deuteranopia) | ❌ 0/2 | 8 (×1) | "Stock status only by coloured dots… indistinguishable to a deuteranope", so it ordered the backordered mug (WCAG 1.4.1) |
+| Low vision (200% zoom + blur) | ❌ 0/2 | 26 (×3.3) | "Checkout button off-screen to the right at 200% zoom": scroll, arrows and Tab all failed (WCAG 1.4.10 reflow) |
+| Keyboard only | ❌ 0/2 | 23.5 (×2.9) | "Proceed to checkout is not keyboard-accessible" (a `<div onclick>`, WCAG 2.1.1). Did everything else with Tab/Enter; its mouse attempts were blocked by our bridge |
+| Hand tremor (±10 px) | ✅ 2/2 | 8 (×1) | Every click jittered and still landed: ±10 px is not enough for these targets |
 
 Each persona fails at the trap built for it, and the agent's own words name the cause well enough to map it to a
-WCAG criterion. The baseline succeeds every time (4 of 4 runs so far).
+WCAG criterion. Across all our valid runs the baseline succeeded every time.
 
 ## What is de-risked
 
@@ -80,25 +85,28 @@ WCAG criterion. The baseline succeeds every time (4 of 4 runs so far).
 
 ## H platform gotchas (cost us hours, read this)
 
-1. **Each self-hosted browser channel is itself a trajectory that holds a session slot.** A run therefore needs 2
-   slots (channel + agent session). Free plan = 3 slots = **1 lane**. Builder ($20/month, 10 slots) = up to 5
-   lanes.
+1. **Each self-hosted browser channel is itself a trajectory that holds a session slot.** A run needs 2 slots
+   (channel + agent session). Opening a channel at capacity returns **429**, which looks like a rate limit but is
+   the slot limit, and every retry counts. `runner.wait_for_slots` waits for 2 free slots before opening one.
 2. **Channels are not closed when the session ends.** They stay `pending` (holding the slot) until H's periodic
-   cleanup marks them `failed` (seen at roughly 25-minute intervals). There is no close endpoint: v2 cancel and
-   v1 PATCH accept the request and change nothing. Hence **lanes**: one channel per lane per audit, with one
-   bridge kept alive and reused by every run (`runner.Lane`). Only the Chrome behind the bridge is swapped.
-3. **A `failed` channel delivers no commands to a new session.** Never reuse channel ids across audits.
-   **Never let two sessions share a channel**: a new session on a channel whose previous session is still
-   running freezes after its first screenshot.
-4. **A session waiting on a dead bridge can't be cancelled**, and its own `max_time_s` doesn't fire either: the
-   cancel is accepted but the session stays `running` (two of ours stayed stuck for more than 30 minutes, each
-   holding a slot). So never kill a bridge while its session runs. Close finished sessions (they end `idle`,
-   holding a slot) with an explicit cancel.
-5. **Opening a channel at capacity returns 429** ("rate-limited"), which looks like a rate limit but is the
-   slot limit. Every retry counts.
-6. Agent names: lowercase letters, digits and hyphens only (no `_`).
-7. Parallel processes must not all ask Selenium Manager for a chromedriver at once ("Text file busy"), so we put
-   ours on PATH.
-
-Questions for the H team on site: how to close a `user_device` channel, and whether they can raise our session
-limit for the hackathon.
+   cleanup marks them `failed` (between about 5 and 30 minutes later). There is no close endpoint: v2 cancel and
+   v1 PATCH accept the request and change nothing. H raised our limit from 3 to 10 slots for the hackathon.
+3. **Use a fresh channel per run.** Reusing one channel for the next session (`--reuse-channel`, kept for
+   slot-starved plans) works most of the time, but H sometimes stops sending commands to the new session right
+   after its first screenshot. We saw it in about 1 of 9 reuses, even after waiting for the previous session to
+   end plus a 20 s grace period. It never happened on a fresh channel. A `failed` channel delivers nothing to a
+   new session, and two sessions on one channel break both.
+4. **A session waiting on a dead bridge can't be cancelled through the API**, and its own `max_time_s` doesn't
+   fire either: it stays `running` and holds a slot until someone stops it from the H web UI. So: never stop a
+   bridge before its session is terminal (`wait_terminal`), and close finished sessions (they end `idle`, holding
+   a slot) with an explicit cancel. The watchdog (`wait_with_watchdog`) flags a run with no new step for 3
+   minutes, prints the session id to stop in the web UI, and retries the run once on a fresh channel.
+5. **The SDK's `wait_for_completion` long-polls for 20 s.** Polling with a shorter timeout raises
+   `httpx.ReadTimeout`, which means "no news yet", not a failure.
+6. **If you reuse a bridge, clear its result cache.** It dedups commands by `command_uid`; we clear it as a
+   precaution.
+7. Agent names: lowercase letters, digits and hyphens only (no `_`).
+8. Parallel processes must not all ask Selenium Manager for a chromedriver at once ("Text file busy"), so we put
+   ours on PATH. A Chrome left on a lane's port by a crashed run is killed before the next run starts.
+9. `runs/<timestamp>/lane-N.log` lists every command the bridge received (names only, never arguments). That
+   log is how you tell "H stopped sending" from "our side hung".
