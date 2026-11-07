@@ -408,6 +408,9 @@ def launch_audit(body: AuditInput, user, extra: dict | None = None, parent_id: s
 @app.get("/api/audits/{audit_id}")
 def audit_detail(audit_id: str, user=Depends(current_user)):
     audit = owned_audit(audit_id, user)
+    if not audit.get("scores") and audit.get("results"):
+        from scoring import scorecard  # audits saved without scores (older ones, fixtures)
+        audit["scores"] = scorecard(audit["results"], audit["config"].get("personas"))
     with store.connect() as db:
         rows = db.execute("SELECT id,created,kind,message FROM events WHERE audit_id=? ORDER BY id DESC LIMIT 100", (audit_id,)).fetchall()
         audit["events"] = [dict(row) for row in reversed(rows)]

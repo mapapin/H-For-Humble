@@ -261,3 +261,19 @@
 .live-dialog .quiet-note { margin: 0 18px 16px; }
 .known-issues summary { font-size: 12px; color: var(--accent); cursor: pointer; margin-top: 4px; }
 .known-issues ul { margin: 6px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.5; color: #55505e; }
+
+/* collapsed sidebar (<= 850px): icon-only new audit button and live run */
+@media (max-width: 850px) {
+  .sidebar-new { width: 40px; height: 40px; min-height: 40px; padding: 0; margin: 14px auto 0; font-size: 0; gap: 0; }
+  .sidebar .active-run { display: none; }
+}
+@media (max-width: 700px) {
+  .score-hero h2, .score-hero-copy h2 { font-size: 22px; }
+  .hero-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+  .hero-facts > div { padding: 4px 10px; min-width: 0; }
+  .hero-facts dd { font-size: 28px; }
+  .score-hero .score-ring { width: 120px !important; height: 120px !important; }
+  .score-hero .score-ring svg { width: 120px; height: 120px; }
+  .static-list li { grid-template-columns: 1fr; }
+  .barrier { grid-template-columns: 1fr; }
+}
