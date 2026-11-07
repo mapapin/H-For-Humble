@@ -1,5 +1,5 @@
 /* Report v2: score hero, live perspective grid, barriers, effort chart, replay player. Builds on style.css tokens. */
-:root { --good: #2f7d57; --good-soft: #e3f1e9; --fair: #a8741a; --fair-soft: #f7eedb; --poor: #b8433b; --poor-soft: #f8e5e2; --live: #d4573b; }
+:root { --good: #25684a; --good-soft: #e3f1e9; --fair: #87601a; --fair-soft: #f7eedb; --poor: #a1362f; --poor-soft: #f8e5e2; --live: #c14a30; }
 
 /* score ring */
 .score-ring { position: relative; display: inline-grid; place-items: center; flex-shrink: 0; }
@@ -33,7 +33,7 @@
 .hero-facts dt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); font-weight: 550; }
 .hero-facts dd { margin: 8px 0 4px; font-family: var(--serif); font-size: 38px; line-height: 1; }
 .hero-facts dd span { font-size: 20px; color: var(--muted); }
-.hero-facts small { font-size: 12px; color: var(--muted); }
+.hero-facts small { display: block; font-family: "DM Sans", sans-serif; font-size: 12px; color: var(--muted); margin-top: 6px; }
 .score-explainer summary { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; list-style: none; }
 .score-explainer summary::-webkit-details-marker { display: none; }
 .score-explainer p { font-size: 12px; line-height: 1.6; color: var(--muted); max-width: 640px; margin-top: 8px; }

@@ -154,13 +154,17 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
                     }
                     on_event = lambda data, idx=idx: emit("progress", lane=idx, **data)
                     record = run_one(spec, lane=lane, on_event=on_event, stop_event=halt)
+                    dead_recycled = record.get("recycled_channel") and record.get("stalled")
                     if record.get("status") == "harness_error" and not halt.is_set() and (
-                            record.get("session_closed") is not False):
-                        # One retry on a fresh browser channel: stalls and setup errors are usually transient.
-                        emit("progress", lane=idx, message=f"{persona.replace('_', ' ').capitalize()}: technical error, "
-                             "retrying once with a fresh browser channel.")
+                            record.get("session_closed") is not False or dead_recycled):
+                        # One retry on a fresh browser channel: stalls, setup errors and a recycled channel that stopped
+                        # delivering commands are transient. (A session stuck on a dead channel ends at its time limit.)
+                        emit("progress", lane=idx, message=f"{persona.replace('_', ' ').capitalize()}: "
+                             + ("the recycled browser channel did not respond" if dead_recycled else "technical error")
+                             + ", retrying once with a fresh browser channel.")
                         previous = record.get("session_id")
-                        record = run_one({**spec, "retry": 1}, lane=lane, on_event=on_event, stop_event=halt)
+                        record = run_one({**spec, "retry": 1, "no_recycle": True}, lane=lane, on_event=on_event,
+                                         stop_event=halt)
                         record["retry_of"] = previous
                     # Never persist third-party exception text: it can contain request headers or credentials.
                     for key in SANITIZED_KEYS:

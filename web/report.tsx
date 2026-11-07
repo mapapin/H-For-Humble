@@ -37,9 +37,9 @@ export function ScoreHero({ audit }: { audit: Audit }) {
       <ScoreExplainer />
     </div>
     <dl className="hero-facts">
-      <div><dt><TriangleAlert size={14} />Barriers</dt><dd>{barriers}</dd><small>{blocking} blocking</small></div>
-      <div><dt><Footprints size={14} />Extra effort</dt><dd>{times(worst?.[1].steps_vs_baseline) || '—'}</dd><small>{worst?.[1].steps_vs_baseline ? `steps for ${pname(worst[0]).toLowerCase()}` : 'vs baseline'}</small></div>
-      <div><dt><Radio size={14} />Agents</dt><dd>{results.length}<span>/{audit.config.tasks.length * audit.config.personas.length * audit.config.repetitions}</span></dd><small>{duration(agentTime)} of browsing{cost ? ` · $${cost.toFixed(2)}` : ''}</small></div>
+      <div><dt><TriangleAlert size={14} />Barriers</dt><dd>{barriers}<small>{blocking} blocking</small></dd></div>
+      <div><dt><Footprints size={14} />Extra effort</dt><dd>{times(worst?.[1].steps_vs_baseline) || '—'}<small>{worst?.[1].steps_vs_baseline ? `steps for ${pname(worst[0]).toLowerCase()}` : 'vs baseline'}</small></dd></div>
+      <div><dt><Radio size={14} />Agents</dt><dd>{results.length}<span>/{audit.config.tasks.length * audit.config.personas.length * audit.config.repetitions}</span><small>{duration(agentTime)} of browsing{cost ? ` · $${cost.toFixed(2)}` : ''}</small></dd></div>
     </dl>
   </section>;
 }

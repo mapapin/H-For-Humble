@@ -320,6 +320,8 @@ def wait_with_watchdog(handle, total_s: float, tag: str, stall_s: float = STALL_
 # before opening a new one. Once H releases channels at session end, the pool simply stays empty.
 POOL_FILE = Path(tempfile.gettempdir()) / "h-audit-channels.json"
 RECYCLE_CHANNELS = os.environ.get("HUMBLE_RECYCLE_CHANNELS", "1") != "0"
+RECYCLE_MAX_IDLE_S = 10 * 60  # released at most this long ago (e.g. the audit just before a re-evaluation)
+RECYCLE_MAX_AGE_S = 25 * 60   # and opened at most this long ago
 
 
 def _pool_load() -> dict[str, dict]:
@@ -347,12 +349,14 @@ def take_recycled_channel() -> str | None:
     """An idle channel of ours that H still holds as pending, reserved for this process. Call under CHANNEL_LOCK."""
     pool, now = _pool_load(), time.time()
     found = None
-    for cid, entry in sorted(pool.items(), key=lambda kv: kv[1].get("released_at", 0)):
+    # Most recently released first: channels left idle for long, close to H's cleanup, stopped delivering
+    # commands after the first ones in our tests (3 of 5 at ~30 min idle), while recent ones worked.
+    for cid, entry in sorted(pool.items(), key=lambda kv: -kv[1].get("released_at", 0)):
         if entry.get("in_use") and _pid_alive(entry["in_use"]):
             continue
         if now - entry.get("released_at", 0) < CHANNEL_REUSE_GRACE_S:
             continue
-        if now - entry.get("created_at", now) > 40 * 60:  # H will clean it up any minute: do not start on it
+        if now - entry.get("released_at", now) > RECYCLE_MAX_IDLE_S or now - entry.get("created_at", now) > RECYCLE_MAX_AGE_S:
             pool.pop(cid, None)
             continue
         try:
@@ -407,7 +411,7 @@ def _pause(seconds: float, stop_event=None, lock=None) -> None:
 
 
 def acquire_channel(client: Client, tag: str, stop_event=None, on_wait=None, timeout_s: float = 2400,
-                    lock=None) -> str | None:
+                    lock=None, recycle: bool = True) -> str | None:
     """Slots for one run (under CHANNEL_LOCK): returns an idle recycled channel (1 more slot needed), or None for
     a fresh channel (2 slots). Waits while neither is possible."""
     deadline = time.monotonic() + timeout_s
@@ -416,7 +420,7 @@ def acquire_channel(client: Client, tag: str, stop_event=None, on_wait=None, tim
             raise RuntimeError("Audit stopped before starting an H session")
         quota = client.sessions.get_session_quota()
         if quota.available is None or quota.available >= 1:
-            cid = take_recycled_channel() if RECYCLE_CHANNELS else None
+            cid = take_recycled_channel() if RECYCLE_CHANNELS and recycle else None
             if cid:
                 print(f"[{tag}] recycling pending browser channel {cid}", flush=True)
                 return cid
@@ -566,7 +570,8 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
             else:
                 channel_id = lane.channel_id if reuse else spec.get("channel_id")  # None = new channel
                 if channel_id is None and not reuse:
-                    channel_id = acquire_channel(client, tag, stop_event=stop_event, on_wait=on_wait, lock=lock)
+                    channel_id = acquire_channel(client, tag, stop_event=stop_event, on_wait=on_wait, lock=lock,
+                                                 recycle=not spec.get("no_recycle"))
                     record["recycled_channel"] = channel_id is not None
                 else:
                     # a new channel and the agent session each take a slot; a pending channel already holds its own
@@ -664,7 +669,9 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
             monitor = threading.Thread(target=observe, daemon=True)
             monitor.start()
         agent_started = time.monotonic()
-        result = wait_with_watchdog(handle, total_s=float(task.get("max_time_s", 600)) + 120, tag=tag)
+        # A recycled channel that stopped delivering commands is detected sooner, then retried on a fresh one.
+        result = wait_with_watchdog(handle, total_s=float(task.get("max_time_s", 600)) + 120, tag=tag,
+                                    first_step_s=45 if record.get("recycled_channel") else FIRST_STEP_S, poll_s=30)
         record["agent_duration_s"] = round(time.monotonic() - agent_started, 1)  # excludes waiting for H slots
 
         record["status"] = str(result.status)
