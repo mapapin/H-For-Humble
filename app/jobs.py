@@ -75,21 +75,25 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
 
     def research():  # Linkup: declared accessibility compliance + legal context, shown next to the measured scores
         try:
-            from research import site_context
+            from research import available, is_public, site_context
+            if not (available() and is_public(config["url"])):
+                return
             context = site_context(config["url"])
+            print(f"[research] Linkup context: {bool(context)}", flush=True)
             if context:
                 emit("context", context=context)
-        except Exception:
-            pass
+        except Exception as exc:
+            traceback.print_exc()
+            emit("progress", message=f"Linkup research unavailable ({type(exc).__name__}).")
 
     if not config.get("patch"):
         threading.Thread(target=research, daemon=True, name="research").start()
     try:
         with Client() as client:
             quota = client.sessions.get_session_quota()
-        if quota.available is not None and quota.available < 2:
-            emit("failed", message=f"H has {quota.active}/{quota.limit} slots in use. This audit needs 2 free slots. "
-                 "Wait for previous browser channels to be released, then try again.")
+        if quota.available is not None and quota.available < 1:
+            emit("failed", message=f"H has {quota.active}/{quota.limit} slots in use. An agent needs at least 1 free "
+                 "slot (2 without a browser channel to recycle). Wait for H to release slots, then try again.")
             return
         site = {"start_url": config["url"], "auth": credentials}
         # standard: one round, then suggested fixes. auto: audit -> fix -> re-audit until every perspective passes.

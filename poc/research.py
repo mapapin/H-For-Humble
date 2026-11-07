@@ -105,7 +105,59 @@ def suggest_journeys(url: str) -> dict[str, Any] | None:
     if not data:
         return None
     data["journeys"] = [j for j in data.get("journeys") or [] if j.get("title") and len(j.get("goal") or "") >= 10][:3]
+    if data.get("accessibility_statement_url"):
+        try:  # the exact declared level, from the statement itself
+            found = read_statement(fetch_markdown(data["accessibility_statement_url"]) or "")
+            if found.get("status"):
+                data["declared_compliance"] = found["status"] + (f" with {found['standard']}" if found.get("standard") else "") \
+                    + (f" ({found['rate']} of applicable criteria met)" if found.get("rate") else "")
+        except Exception:
+            pass
     return {**data, "source": "linkup"}
+
+
+FETCH_API = "https://api.linkup.so/v1/fetch"
+STATEMENT_PATHS = ("/declaration-daccessibilite/", "/accessibilite/", "/accessibilite", "/accessibility/",
+                   "/accessibility-statement/", "/accessibility")
+
+
+def fetch_markdown(url: str) -> str | None:
+    """Linkup fetch: the page as markdown (rendered server-side by Linkup)."""
+    key = os.environ.get("LINKUP_API_KEY")
+    if not key:
+        return None
+    r = httpx.post(FETCH_API, headers={"Authorization": f"Bearer {key}"}, json={"url": url}, timeout=TIMEOUT_S)
+    if r.status_code != 200:
+        return None
+    return r.json().get("markdown") or None
+
+
+def read_statement(markdown: str) -> dict[str, Any]:
+    """What an accessibility statement declares, read from its text (French RGAA or English WCAG wording)."""
+    import re
+
+    text = " ".join(markdown.replace("*", "").split())
+    out: dict[str, Any] = {}
+    m = re.search(r"(?i)\b(partiellement|totalement|non)\s+conforme", text) or \
+        re.search(r"(?i)\b(partially|fully|not|non)[ -](conformant|compliant)", text)
+    if m:
+        word = m.group(1).lower()
+        out["status"] = {"partiellement": "Partially compliant", "partially": "Partially compliant",
+                         "totalement": "Fully compliant", "fully": "Fully compliant"}.get(word, "Not compliant")
+    m = re.search(r"(?i)(\d{1,3}(?:[.,]\d+)?)\s?%\s*(?:des|of)\s*(?:the\s*)?crit[eè]r", text) or \
+        re.search(r"(?i)taux (?:moyen )?de conformit[ée][^.%]{0,60}?(\d{1,3}(?:[.,]\d+)?)\s?%", text)
+    if m:
+        out["rate"] = m.group(1).replace(",", ".") + "%"
+    m = re.search(r"(?i)RGAA[^.\d]{0,40}?(\d(?:\.\d+){1,2})", text) or re.search(r"(?i)RGAA\s?(\d(?:\.\d+)*)", text)
+    if m:
+        out["standard"] = f"RGAA {m.group(1)}"
+    elif (m := re.search(r"(?i)WCAG\s?(2\.\d)\s*(?:level\s*)?(AAA|AA|A)?", text)):
+        out["standard"] = f"WCAG {m.group(1)}" + (f" {m.group(2)}" if m.group(2) else "")
+    issues = re.findall(r"(?m)^\s*[-*]\s*\**(\d{1,2}\.\d{1,2})\**\s*[–:-]\s*(.{8,140}?)\s*$", markdown)
+    out["known_issues"] = [f"{n} {t.strip().rstrip('.;')}" for n, t in issues[:6]]
+    if re.search(r"(?i)auto-?[ée]valuation|audit interne|internal (audit|assessment)|self-?assess", text):
+        out["self_assessed"] = True
+    return out
 
 
 def site_context(url: str) -> dict[str, Any] | None:
@@ -116,5 +168,26 @@ def site_context(url: str) -> dict[str, Any] | None:
          "accessibility statement), the compliance level it declares (RGAA or WCAG, percentage if given), the date "
          "and whether the audit was internal. Also which accessibility laws apply to this kind of service in its "
          "market (for example the European Accessibility Act, French RGAA obligations).")
-    data = _search(q, CONTEXT_SCHEMA)
+    data = _search(q, CONTEXT_SCHEMA) or {}
+    # Read the statement itself (Linkup fetch) for the exact declared level, rather than a paraphrase.
+    candidates = [data.get("accessibility_statement_url")] if data.get("accessibility_statement_url") else []
+    origin = f"{urlsplit(url).scheme}://{urlsplit(url).netloc}"
+    candidates += [origin + p for p in STATEMENT_PATHS]
+    for candidate in candidates:
+        try:
+            md = fetch_markdown(candidate)
+        except Exception:
+            md = None
+        if not md:
+            continue
+        found = read_statement(md)
+        if found.get("status"):
+            parts = [found["status"]]
+            if found.get("standard"):
+                parts.append(f"with {found['standard']}")
+            declared = " ".join(parts) + (f" ({found['rate']} of applicable criteria met)" if found.get("rate") else "")
+            data.update(declared_compliance=declared, accessibility_statement_url=candidate,
+                        known_issues=found.get("known_issues", []), declared_rate=found.get("rate"),
+                        self_assessed=found.get("self_assessed", data.get("self_assessed")))
+            break
     return {**data, "source": "linkup", "url": url} if data else None

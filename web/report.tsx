@@ -57,7 +57,8 @@ export function ContextCard({ audit }: { audit: Audit }) {
   return <section className="context-card" aria-label="Declared accessibility">
     <div className="context-col"><span className="eyebrow"><BookOpenCheck size={14} />DECLARED{c.organisation ? ` BY ${c.organisation.toUpperCase()}` : ''}</span>
       <p className="context-claim">{c.declared_compliance}</p>
-      <small>{[c.audit_date && `Audit ${c.audit_date}`, c.self_assessed && 'self-assessed'].filter(Boolean).join(' · ')}{c.accessibility_statement_url && <> · <a href={c.accessibility_statement_url} target="_blank" rel="noreferrer">Accessibility statement<ArrowUpRight size={11} /></a></>}</small></div>
+      <small>{c.self_assessed ? 'Self-assessed' : 'Declared'}{c.accessibility_statement_url && <> · <a href={c.accessibility_statement_url} target="_blank" rel="noreferrer">accessibility statement<ArrowUpRight size={11} /></a></>}</small>
+      {!!c.known_issues?.length && <details className="known-issues"><summary>{c.known_issues.length} known issues listed by the site</summary><ul>{c.known_issues.map((k, i) => <li key={i}>{k}</li>)}</ul></details>}</div>
     <div className="context-vs" aria-hidden="true">vs</div>
     <div className="context-col"><span className="eyebrow"><Scale size={14} />MEASURED BY HUMBLE</span>
       <p className="context-claim">{s.score == null ? 'Measuring…' : `${s.impaired_blocked || 0} of ${(s.tested_perspectives || 1) - 1} impaired perspectives blocked · score ${s.score}/100`}</p>

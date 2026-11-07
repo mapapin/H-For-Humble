@@ -69,7 +69,7 @@ class WorkerTests(unittest.TestCase):
     def test_quota_prevents_opening_a_channel(self):
         messages = queue.Queue()
         with patch("hai_agents.Client") as client, patch("runner.Lane") as lane:
-            client.return_value.__enter__.return_value.sessions.get_session_quota.return_value = SimpleNamespace(available=1, active=2, limit=3)
+            client.return_value.__enter__.return_value.sessions.get_session_quota.return_value = SimpleNamespace(available=0, active=3, limit=3)
             audit_worker("test-audit", self.config(), {}, "/unused", messages, threading.Event(), threading.Event())
             lane.assert_not_called()
             self.assertEqual(messages.get()["kind"], "failed")

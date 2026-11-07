@@ -1,0 +1,26 @@
+# Lune: a polished pottery-workshop booking site with one accessibility trap per persona
+# (poc/demo_startup/server.py; traps and expected results in poc/demo_startup/README.md).
+# Run it first:  python poc/demo_startup/server.py --port 8770
+site:
+  name: Lune (pottery workshops in Paris, deliberately inaccessible demo)
+  start_url: http://127.0.0.1:8770/
+  auth:
+    # Form login, only needed when the server runs with LUNE_REQUIRE_LOGIN=1 (checkout then asks for it).
+    # The agent focuses the field and calls the fill_credential tool; the value never reaches the model.
+    # Test account of our local demo app only.
+    login:
+      username: camille@lune-atelier.test
+      password: terre-cuite-2026
+    # Header auth (staging behind a gateway): only checked when the server runs with LUNE_TOKEN set.
+    # ${VAR} is read from the environment (empty when unset, which the server then ignores).
+    headers:
+      X-Audit-Token: ${LUNE_TOKEN}
+
+tasks:
+  - id: book-wheel-throwing
+    goal: >-
+      Book 2 seats for the "Wheel throwing for beginners" workshop on the first available date in December,
+      go to the checkout page and report the total price shown there. Do not pay.
+    expect_answer_contains: "98.00"
+    max_steps: 35
+    max_time_s: 480

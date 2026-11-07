@@ -219,10 +219,11 @@ class DevToolsController:
         if self.headers:
             self.call("Network.enable", {}, sid)
             self.call("Network.setExtraHTTPHeaders", {"headers": self.headers}, sid)
+        if is_page and (self.capture_pages or self.patch_script):
+            # Page.enable first: Chrome 157 ignores addScriptToEvaluateOnNewDocument on a page domain not enabled
+            self.call("Page.enable", {}, sid)
         if is_page and self.patch_script:
             self.call("Page.addScriptToEvaluateOnNewDocument", {"source": self.patch_script}, sid)
-        if is_page and self.capture_pages:
-            self.call("Page.enable", {}, sid)
 
     # -- helpers -------------------------------------------------------------------------
     def navigate(self, url: str) -> None:
