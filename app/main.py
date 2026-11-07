@@ -488,6 +488,16 @@ def export(audit_id: str, user=Depends(current_user)):
                     headers={"Content-Disposition": f'attachment; filename="humble-audit-{audit_id[:8]}.json"'})
 
 
+@app.get("/api/audits/{audit_id}/report.html")
+def export_html(audit_id: str, user=Depends(current_user)):
+    """A self-contained HTML report (images and replays embedded) that opens anywhere, offline."""
+    from export_report import build
+    audit = owned_audit(audit_id, user)
+    page = build(audit, store.DATA / "audits" / audit_id)
+    return Response(page, media_type="text/html; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="humble-report-{audit_id[:8]}.html"'})
+
+
 @app.get("/api/audits/{audit_id}/files/{filename}")
 def artifact(audit_id: str, filename: str, user=Depends(current_user)):
     audit = owned_audit(audit_id, user)

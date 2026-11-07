@@ -66,7 +66,7 @@ export function AuditDetail({ id, onBack, onRerun, onUpdate, onOpen = next => { 
 
     <div className="detail-tabs"><div className="detail-tab-buttons" role="tablist" aria-label="Report views" onKeyDown={e => { const index = TABS.indexOf(tab); const next = e.key === 'ArrowRight' ? TABS[(index + 1) % TABS.length] : e.key === 'ArrowLeft' ? TABS[(index + TABS.length - 1) % TABS.length] : e.key === 'Home' ? TABS[0] : e.key === 'End' ? TABS[TABS.length - 1] : null; if (next) { e.preventDefault(); setTab(next); document.getElementById(`audit-tab-${next}`)?.focus(); } }}>
       {TABS.map(t => <button key={t} id={`audit-tab-${t}`} role="tab" aria-controls="audit-tabpanel" tabIndex={tab === t ? 0 : -1} aria-selected={tab === t} onClick={() => setTab(t)}>{t === 'report' ? 'Perspectives' : t === 'fixes' ? <><Sparkles size={14} />Fixes</> : 'Activity'}{t === 'fixes' && fixCount ? <span className="number-pill">{fixCount}</span> : null}</button>)}
-    </div><a className="text-button muted" href={`/api/audits/${id}/export`} download><ArrowDownToLine size={15} />Export JSON</a></div>
+    </div><div className="export-links"><a className="text-button muted" href={`/api/audits/${id}/report.html`} download><ArrowDownToLine size={15} />Report (HTML)</a><a className="text-button muted" href={`/api/audits/${id}/export`} download>JSON</a></div></div>
     <div id="audit-tabpanel" role="tabpanel" aria-labelledby={`audit-tab-${tab}`}>
       {tab === 'report' && <>
         <PerspectiveGrid audit={audit} onReplay={setReplay} />
