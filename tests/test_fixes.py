@@ -1,0 +1,115 @@
+"""Fix workflows: patch script, canned fixer, before/after crop, re-evaluation API. No H sessions, no Chrome."""
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+from PIL import Image, ImageDraw
+
+from app import store
+from app.main import app, login_attempts
+from fixes import CannedFixer, merge_patches, patch_script
+from render import crop_to_content
+
+DEMO = Path(__file__).resolve().parents[1] / "poc" / "fixes" / "demo_shop.json"
+SITE = {"start_url": "http://127.0.0.1:8765/"}
+
+
+def rows(**rates):
+    return [{"task": "t", "persona": p, "success_rate": r} for p, r in rates.items()]
+
+
+class FixTests(unittest.TestCase):
+    def test_patch_script_scopes_fixes_to_their_page(self):
+        script = patch_script([{"id": "x", "page_url": "http://site.test/cart", "css": ".a{color:red}", "js": "window.ran = 1;"}])
+        self.assertIn('path: "/cart"', script)
+        self.assertIn(".a{color:red}", script)
+        self.assertIn("__auditPagePath", script)  # snapshots re-rendered from a local file still match the page
+
+    def test_canned_fixer_only_fixes_what_failed_on_its_own_site(self):
+        fixer = CannedFixer(DEMO)
+        got = fixer.generate([], rows(baseline=1.0, keyboard_only=0.0, tremor=1.0), "/unused", SITE)
+        self.assertEqual([f["id"] for f in got["fixes"]], ["checkout-keyboard"])
+        other_site = fixer.generate([], rows(keyboard_only=0.0), "/unused", {"start_url": "https://customer.example/"})
+        self.assertEqual(other_site["fixes"], [])
+
+    def test_merged_patch_keeps_earlier_fixes(self):
+        fixer = CannedFixer(DEMO)
+        first = fixer.generate([], rows(keyboard_only=0.0), "/unused", SITE)
+        second = fixer.generate([], rows(keyboard_only=0.0, color_blind=0.0), "/unused", SITE, previous=first)
+        self.assertEqual([f["id"] for f in second["fixes"]], ["stock-text-labels"])  # only what is new
+        self.assertEqual({f["id"] for f in merge_patches(first, second)["fixes"]}, {"checkout-keyboard", "stock-text-labels"})
+
+    def test_crop_starts_slider_at_the_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            before, after = Path(tmp, "b.png"), Path(tmp, "a.png")
+            Image.new("RGB", (1280, 800), "white").save(before)
+            img = Image.new("RGB", (1280, 800), "white")
+            ImageDraw.Draw(img).rectangle((900, 300, 1000, 340), fill="navy")
+            img.save(after)
+            split = crop_to_content(before, after)
+            with Image.open(before) as b, Image.open(after) as a:
+                self.assertEqual(b.size, a.size)
+                self.assertLess(a.width, 1280)
+            self.assertTrue(0 < split < 100)
+
+
+class ReevaluateApiTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.storage = patch.object(store, "DATA", Path(self.temp.name))
+        self.storage.start()
+        login_attempts.clear()
+        self.ctx = TestClient(app)
+        self.client = self.ctx.__enter__()
+        r = self.client.post("/api/auth/register", json={"name": "A", "email": "a@example.test", "password": "local-test-password"})
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def tearDown(self):
+        self.ctx.__exit__(None, None, None)
+        self.storage.stop()
+        self.temp.cleanup()
+
+    def launch(self, path, body):
+        with patch("app.main.manager.start", return_value=True), patch("chrome.chrome_binary", return_value="chrome"), \
+                patch.dict("os.environ", {"HAI_API_KEY": "fixture-key"}):
+            return self.client.post(path, json=body)
+
+    def finished_audit_with_fixes(self):
+        body = {"name": "Checkout", "url": "http://127.0.0.1:8765/", "personas": ["keyboard_only"], "repetitions": 1,
+                "tasks": [{"title": "Checkout", "goal": "Find a product and report the checkout total."}],
+                "credentials": {"username": "fixture-user", "password": "fixture-site-secret"}}
+        audit = self.launch("/api/audits", body).json()
+        self.assertTrue(audit["config"]["uses_login"])
+        self.assertNotIn("fixture-site-secret", json.dumps(audit))
+        store.update(audit["id"], status="completed", fixes={"patch": json.loads(DEMO.read_text()), "comparisons": []})
+        return audit
+
+    def test_reevaluation_requires_fixes_and_manual_credentials_again(self):
+        audit = self.finished_audit_with_fixes()
+        missing = self.launch(f"/api/audits/{audit['id']}/reevaluate", {})
+        self.assertEqual(missing.status_code, 422, missing.text)
+        ok = self.launch(f"/api/audits/{audit['id']}/reevaluate",
+                         {"credentials": {"username": "fixture-user", "password": "fixture-site-secret"}})
+        self.assertEqual(ok.status_code, 201, ok.text)
+        child = ok.json()
+        self.assertEqual(child["parent_id"], audit["id"])
+        self.assertEqual(len(child["config"]["patch"]["fixes"]), 5)
+        detail = self.client.get(f"/api/audits/{child['id']}").json()
+        self.assertEqual(detail["parent"]["id"], audit["id"])
+        parent = self.client.get(f"/api/audits/{audit['id']}").json()
+        self.assertEqual([r["id"] for r in parent["reevaluations"]], [child["id"]])
+
+    def test_audit_without_fixes_cannot_be_reevaluated(self):
+        body = {"name": "Plain", "url": "http://127.0.0.1:8765/", "personas": ["baseline"], "repetitions": 1,
+                "tasks": [{"title": "Read", "goal": "Read the main heading of the page."}]}
+        audit = self.launch("/api/audits", body).json()
+        store.update(audit["id"], status="completed")
+        r = self.launch(f"/api/audits/{audit['id']}/reevaluate", {})
+        self.assertEqual(r.status_code, 409, r.text)
+
+
+if __name__ == "__main__":
+    unittest.main()

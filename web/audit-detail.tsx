@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, CheckCircle2, Clock3, Eye, LockKeyhole, Pause, Play, ShieldCheck, Square, Target, TriangleAlert, X } from 'lucide-react';
 import { api, date, Dialog, ErrorNote, host, PERSONAS, pname, PersonaIcon, Spinner, Status, terminal, total } from './shared';
 import type { Audit, Run } from './shared';
+import { FixesPanel } from './fixes';
+
+const TABS = ['overview', 'evidence', 'fixes', 'activity'];
 
 type Case = { persona: string; task: string; run: number };
 const sameCase = (a: Partial<Case>, b: Partial<Case>) => a.persona === b.persona && a.task === b.task && a.run === b.run;
@@ -16,7 +19,7 @@ const caseState = (audit: Audit, selected: Case) => {
   return terminal(audit.status) ? 'Not run' : 'Queued';
 };
 
-export function AuditDetail({ id, onBack, onRerun, onUpdate }: { id: string; onBack: () => void; onRerun: (a: Audit) => void; onUpdate: () => Promise<void> }) {
+export function AuditDetail({ id, onBack, onRerun, onUpdate, onOpen = next => { location.hash = `audit/${next}`; } }: { id: string; onBack: () => void; onRerun: (a: Audit) => void; onUpdate: () => Promise<void>; onOpen?: (id: string) => void }) {
   const [audit, setAudit] = useState<Audit | null>(null), [error, setError] = useState('');
   const [busy, setBusy] = useState(false), [tab, setTab] = useState('overview'), [connected, setConnected] = useState(true);
   const [selected, setSelected] = useState<Case | null>(null), [stopConfirm, setStopConfirm] = useState(false);
@@ -89,7 +92,7 @@ export function AuditDetail({ id, onBack, onRerun, onUpdate }: { id: string; onB
     </section>
     {isActive && <div className="active-case-banner"><div><span className="live-dot" /><span><strong>{audit.status === 'paused' ? 'Queue paused · current run continues' : audit.status === 'stopping' ? 'Stop requested' : activeCase ? `${pname(activeCase.persona)} is exploring` : 'Preparing the first test'}</strong><small>{audit.config.tasks.find(t => t.id === activeCase?.task)?.title || 'Connecting the dedicated browser'}{activeCase ? ` · Run ${activeCase.run + 1}` : ''} · {audit.progress.actions || 0} actions observed</small></span></div>{activeCase && <button className="button secondary" onClick={() => setSelected(activeCase)}><Eye size={15} />Open live case</button>}</div>}
 
-    <div className="detail-tabs"><div className="detail-tab-buttons" role="tablist" aria-label="Audit views" onKeyDown={e => { const tabs = ['overview', 'evidence', 'activity']; const index = tabs.indexOf(tab); const next = e.key === 'ArrowRight' ? tabs[(index + 1) % 3] : e.key === 'ArrowLeft' ? tabs[(index + 2) % 3] : e.key === 'Home' ? tabs[0] : e.key === 'End' ? tabs[2] : null; if (next) { e.preventDefault(); setTab(next); document.getElementById(`audit-tab-${next}`)?.focus(); } }}>{['overview', 'evidence', 'activity'].map(t => <button key={t} id={`audit-tab-${t}`} role="tab" aria-controls="audit-tabpanel" tabIndex={tab === t ? 0 : -1} aria-selected={tab === t} onClick={() => setTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}{t === 'evidence' && <span className="number-pill">{records.length}</span>}</button>)}</div><a className="text-button muted" href={`/api/audits/${id}/export`} download><ArrowDownToLine size={15} />Export JSON</a></div>
+    <div className="detail-tabs"><div className="detail-tab-buttons" role="tablist" aria-label="Audit views" onKeyDown={e => { const tabs = TABS; const index = tabs.indexOf(tab); const next = e.key === 'ArrowRight' ? tabs[(index + 1) % tabs.length] : e.key === 'ArrowLeft' ? tabs[(index + tabs.length - 1) % tabs.length] : e.key === 'Home' ? tabs[0] : e.key === 'End' ? tabs[tabs.length - 1] : null; if (next) { e.preventDefault(); setTab(next); document.getElementById(`audit-tab-${next}`)?.focus(); } }}>{TABS.map(t => <button key={t} id={`audit-tab-${t}`} role="tab" aria-controls="audit-tabpanel" tabIndex={tab === t ? 0 : -1} aria-selected={tab === t} onClick={() => setTab(t)}>{t.charAt(0).toUpperCase() + t.slice(1)}{t === 'evidence' && <span className="number-pill">{records.length}</span>}{t === 'fixes' && (audit.fixes?.patch?.fixes?.length || audit.parent?.fixes?.patch?.fixes?.length) ? <span className="number-pill">{audit.fixes?.patch?.fixes?.length || audit.parent?.fixes?.patch?.fixes?.length}</span> : null}</button>)}</div><a className="text-button muted" href={`/api/audits/${id}/export`} download><ArrowDownToLine size={15} />Export JSON</a></div>
     <div id="audit-tabpanel" role="tabpanel" aria-labelledby={`audit-tab-${tab}`} tabIndex={0}>
       {tab === 'overview' && <>
         <section className="section journey-section"><div className="section-heading"><div><h2>Journey breakdown</h2><p>Measured outcomes, effort and timing for every journey and perspective.</p></div></div>{audit.summary.length ? <div className="table-wrap"><table className="breakdown-table"><thead><tr><th>Journey / Perspective</th><th>Passed / Tested</th><th>Avg. steps</th><th>Avg. agent time</th><th><span className="sr-only">View test cases</span></th></tr></thead><tbody>{audit.summary.map(row => {
@@ -100,6 +103,7 @@ export function AuditDetail({ id, onBack, onRerun, onUpdate }: { id: string; onB
         <p className="report-footnote">Simulated journeys, not an accessibility certification. Technical errors are excluded from test outcomes.</p>
       </>}
       {tab === 'evidence' && <div className="case-evidence-list">{records.length ? records.map(r => <button className="case-evidence-row" key={r.tag} onClick={() => setSelected(r)}><PersonaIcon id={r.persona} /><span><strong>{pname(r.persona)}</strong><small>{audit.config.tasks.find(t => t.id === r.task)?.title} · Run {r.run + 1}</small></span><span className={`case-outcome ${technical(r) ? 'error' : r.success ? 'passed' : 'failed'}`}>{caseState(audit, r)}</span><span className="case-row-metrics">{r.steps ?? '—'} steps · {duration(r.agent_duration_s ?? null)}</span><Eye size={17} /></button>) : <div className="quiet-note">Screenshots and structured reports appear after each test. Select a perspective above to inspect a queued or live case.</div>}</div>}
+      {tab === 'fixes' && <FixesPanel audit={audit} onOpen={onOpen} />}
       {tab === 'activity' && <section className="activity-panel"><h2>The exploration, step by step.</h2><div className="event-list">{audit.events?.length ? audit.events.map(e => <div className="event-item" key={e.id}><span className={`event-dot ${e.kind}`} /><time>{new Date(e.created * 1000).toLocaleTimeString('en-GB')}</time><p>{e.message}</p></div>) : <p>Preparing the event feed…</p>}</div></section>}
     </div>
     {selected && <CasePreview audit={audit} selected={selected} select={setSelected} close={closeCase} />}

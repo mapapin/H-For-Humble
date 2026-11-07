@@ -128,9 +128,15 @@ class DevToolsController:
 
     Emulation only lasts while this connection stays open, so it lives for the whole run."""
 
-    def __init__(self, port: int, persona: Persona, headers: dict[str, str] | None = None) -> None:
+    def __init__(self, port: int, persona: Persona, headers: dict[str, str] | None = None,
+                 patch_script: str | None = None, capture_pages: bool = False) -> None:
+        """patch_script: JS run in every page before its own scripts (preview of suggested fixes).
+        capture_pages: keep the rendered HTML of every page that finishes loading (for fix generation)."""
         self.persona = persona
         self.headers = headers or {}
+        self.patch_script = patch_script
+        self.capture_pages = capture_pages
+        self.snapshots: dict[str, str] = {}  # url -> rendered HTML (latest load wins), in visit order
         info = httpx.get(f"http://127.0.0.1:{port}/json/version", timeout=5, trust_env=False).json()
         self.ws = websocket.create_connection(info["webSocketDebuggerUrl"], suppress_origin=True, timeout=None)
         self._lock = threading.Lock()
@@ -183,6 +189,9 @@ class DevToolsController:
                     ev.set()
             elif msg.get("method") == "Target.attachedToTarget":
                 threading.Thread(target=self._on_attach, args=(msg["params"],), daemon=True).start()
+            elif msg.get("method") == "Page.loadEventFired" and self.capture_pages and msg.get("sessionId"):
+                # handled off this thread: a DevTools call from the reader thread would wait for itself
+                threading.Thread(target=self.snapshot_page, args=(msg["sessionId"],), daemon=True).start()
 
     def _on_attach(self, params: dict) -> None:
         sid = params["sessionId"]
@@ -210,12 +219,42 @@ class DevToolsController:
         if self.headers:
             self.call("Network.enable", {}, sid)
             self.call("Network.setExtraHTTPHeaders", {"headers": self.headers}, sid)
+        if is_page and self.patch_script:
+            self.call("Page.addScriptToEvaluateOnNewDocument", {"source": self.patch_script}, sid)
+        if is_page and self.capture_pages:
+            self.call("Page.enable", {}, sid)
 
     # -- helpers -------------------------------------------------------------------------
     def navigate(self, url: str) -> None:
         if not self.page_sessions:
             raise RuntimeError("no page attached")
         self.call("Page.navigate", {"url": url}, self.page_sessions[0])
+
+    def evaluate(self, expression: str, session_id: str | None = None):
+        sid = session_id or self.page_sessions[-1]
+        res = self.call("Runtime.evaluate", {"expression": expression, "returnByValue": True}, sid)
+        return res.get("result", {}).get("value")
+
+    def snapshot_page(self, session_id: str | None = None) -> None:
+        """Store the current rendered HTML of a page (what the user sees, after scripts ran)."""
+        try:
+            got = self.evaluate("JSON.stringify([location.href, document.documentElement.outerHTML])", session_id)
+            url, html = json.loads(got)
+            if url.startswith("http"):
+                self.snapshots.pop(url, None)
+                self.snapshots[url] = html
+        except Exception as exc:
+            self.errors.append(f"snapshot: {exc}")
+
+    def wait_loaded(self, timeout: float = 15) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                if self.evaluate("document.readyState") == "complete":
+                    return
+            except Exception:
+                pass
+            time.sleep(0.2)
 
     def screenshot(self) -> bytes:
         import base64

@@ -47,6 +47,17 @@ saw it, and an Agent View replay link) and `results.json`.
 Presets (`poc/presets/*.yaml`) hold the site, how to get in (form login and/or headers, `${ENV}` expansion) and the
 customer's own tasks, with an optional expected answer for automatic grading.
 
+## Fix workflows (pipeline.py)
+
+```bash
+.venv/bin/python poc/pipeline.py suggest --audit poc/runs/<dir>      # patch + before/after images + fixes.html
+.venv/bin/python poc/pipeline.py reevaluate --audit poc/runs/<dir>   # same audit with the patch injected
+.venv/bin/python poc/pipeline.py auto --preset poc/presets/demo_shop.yaml --max-rounds 2   # fix until it passes
+```
+
+`fixes.py` (patch format, Devin and canned fixers), `render.py` (snapshot re-rendering, overlays, crop) and
+`pipeline.py` (workflows, scores, HTML report with sliders) are also what the web app's worker calls.
+
 ## Results (2026-11-07, demo shop, task "buy an in-stock blue mug and report the checkout total")
 
 Expected answer €19.90. Each trap in the demo shop is described at the top of `demo_site/server.py`.

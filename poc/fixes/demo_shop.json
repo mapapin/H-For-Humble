@@ -1,0 +1,60 @@
+{
+  "summary": "Hand-written fixes for the Mugs & Co demo shop, in the same shape Devin returns. Stock status gets a text label, the cart reflows at 200% zoom, checkout becomes a real link reachable by keyboard, the order total gets readable contrast, and the add-to-cart buttons get a 32px target.",
+  "fixes": [
+    {
+      "id": "stock-text-labels",
+      "title": "Say the stock status in words, not only with a coloured dot",
+      "wcag": "1.4.1 Use of Color",
+      "personas": ["color_blind"],
+      "page_url": "http://127.0.0.1:8765/shop",
+      "description": "In-stock and out-of-stock items differ only by a green or red dot, which look identical with red-green colour blindness. The colour-blind user ordered the backordered mug. Add the status as text next to each dot.",
+      "css": ".audit-stock-label{margin-left:6px;font-size:12px;font-weight:bold}.audit-stock-label.in{color:#1a6b1a}.audit-stock-label.out{color:#b00020}",
+      "js": "document.querySelectorAll('td .dot').forEach(function (dot) {\n  if (dot.dataset.auditLabelled) return;\n  dot.dataset.auditLabelled = '1';\n  var rgb = (getComputedStyle(dot).backgroundColor.match(/\\d+/g) || [0, 0, 0]).map(Number);\n  var inStock = rgb[1] > rgb[0];\n  var label = document.createElement('span');\n  label.className = 'audit-stock-label ' + (inStock ? 'in' : 'out');\n  label.textContent = inStock ? 'In stock' : 'Out of stock';\n  dot.after(label);\n});",
+      "code_change": "In shop_page(), render the status as text next to the dot, e.g. <span class=\"stock\">In stock</span> / <span class=\"stock\">Out of stock (ships in 6 weeks)</span>, and keep the dot as a decorative extra (aria-hidden=\"true\")."
+    },
+    {
+      "id": "cart-reflow",
+      "title": "Let the cart reflow at 200% zoom",
+      "wcag": "1.4.10 Reflow",
+      "personas": ["low_vision"],
+      "page_url": "http://127.0.0.1:8765/cart",
+      "description": "The cart uses a fixed 1200px layout with horizontal overflow hidden and pins 'Proceed to checkout' to the right edge. At 200% zoom the button is cut off and cannot be scrolled to. Use a fluid layout and keep the button in the flow.",
+      "css": "html, body { overflow-x: visible !important; } .layout { width: auto !important; max-width: 100% !important; } .checkout { position: static !important; display: inline-block !important; margin-top: 16px; }",
+      "js": "",
+      "code_change": "In cart_page() CSS, replace `.layout { width: 1200px }` with `max-width: 1200px; width: 100%`, remove `overflow-x: hidden` from html/body, and place the checkout control in the normal flow instead of `position: absolute; right: 0`."
+    },
+    {
+      "id": "checkout-keyboard",
+      "title": "Make 'Proceed to checkout' a real link",
+      "wcag": "2.1.1 Keyboard",
+      "personas": ["keyboard_only"],
+      "page_url": "http://127.0.0.1:8765/cart",
+      "description": "'Proceed to checkout' is a <div> with an onclick handler: it is not in the Tab order and Enter does nothing, so keyboard users cannot check out. Use a link (or a button) instead.",
+      "css": ".checkout:focus-visible { outline: 3px solid #ffbf47; outline-offset: 2px; }",
+      "js": "var div = document.querySelector('div.checkout');\nif (div) {\n  var a = document.createElement('a');\n  a.href = '/checkout';\n  a.className = div.className;\n  a.textContent = div.textContent;\n  a.style.color = '#fff';\n  a.style.textDecoration = 'none';\n  div.replaceWith(a);\n}",
+      "code_change": "In cart_page(), replace `<div class=\"checkout\" onclick=\"location.href='/checkout'\">` with `<a class=\"checkout\" href=\"/checkout\">Proceed to checkout</a>` and add a visible :focus-visible style."
+    },
+    {
+      "id": "checkout-total-contrast",
+      "title": "Give the order total readable contrast and size",
+      "wcag": "1.4.3 Contrast (Minimum)",
+      "personas": ["low_vision"],
+      "page_url": "http://127.0.0.1:8765/checkout",
+      "description": "The order total is 11px light grey (#c9c9c9) on white, a contrast ratio of about 1.6:1. WCAG requires 4.5:1. Low-vision users cannot read the most important number on the page.",
+      "css": ".total { color: #1a1a1a !important; font-size: 18px !important; font-weight: bold !important; }",
+      "js": "",
+      "code_change": "In checkout_page() CSS, set `.total { color: #1a1a1a; font-size: 1.125rem; font-weight: 700 }`."
+    },
+    {
+      "id": "add-button-target-size",
+      "title": "Enlarge the add-to-cart buttons",
+      "wcag": "2.5.8 Target Size (Minimum)",
+      "personas": ["tremor"],
+      "page_url": "http://127.0.0.1:8765/shop",
+      "description": "The '+' buttons are 14x14px on 18px-high rows, so a slightly imprecise click adds the wrong product. WCAG 2.2 asks for targets of at least 24x24px.",
+      "css": ".add { width: 32px !important; height: 32px !important; font-size: 18px !important; line-height: 28px !important; } td { height: 40px !important; }",
+      "js": "",
+      "code_change": "In shop_page() CSS, set `.add { min-width: 32px; min-height: 32px }` and give rows enough height (e.g. `td { height: 40px }`), and give the button an accessible name such as aria-label=\"Add Blue Mug - Large to cart\"."
+    }
+  ]
+}

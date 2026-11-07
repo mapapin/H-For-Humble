@@ -59,6 +59,15 @@ def init():
         );
         CREATE INDEX IF NOT EXISTS vault_owner ON vault_entries(user_id, updated);
         """)
+        # Fix workflows: suggested fixes (patch + before/after images), auto-mode rounds, re-evaluation parent.
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(audits)")}
+        for name, ddl in (("fixes", "TEXT NOT NULL DEFAULT '{}'"), ("rounds", "TEXT NOT NULL DEFAULT '[]'"),
+                          ("parent_id", "TEXT")):
+            if name not in columns:
+                db.execute(f"ALTER TABLE audits ADD COLUMN {name} {ddl}")
+
+
+JSON_FIELDS = ("results", "summary", "progress", "fixes", "rounds")
 
 
 def event(audit_id, kind, message):
@@ -68,17 +77,17 @@ def event(audit_id, kind, message):
 
 
 def update(audit_id, **fields):
-    allowed = {"status", "results", "summary", "progress", "error", "finished"}
+    allowed = {"status", "results", "summary", "progress", "error", "finished", "fixes", "rounds"}
     assert fields and set(fields) <= allowed
-    values = [json.dumps(v) if k in {"results", "summary", "progress"} else v for k, v in fields.items()]
+    values = [json.dumps(v) if k in JSON_FIELDS else v for k, v in fields.items()]
     with connect() as db:
         db.execute(f"UPDATE audits SET {','.join(k + '=?' for k in fields)} WHERE id=?", (*values, audit_id))
 
 
 def serialize(row):
     result = dict(row)
-    for key in ("config", "results", "summary", "progress"):
-        if key in result:
+    for key in ("config", *JSON_FIELDS):
+        if key in result and result[key] is not None:
             result[key] = json.loads(result[key])
     result.pop("user_id", None)
     return result

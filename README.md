@@ -17,7 +17,11 @@ Built by **H For Humble — Théophile + Mattéo**, for the H Company × 42AI Co
 - Pause/resume the run queue; stop requests cancellation of the active H session and skips remaining runs.
 - Statistics first: passed/failed counts, reported barriers, navigation steps and agent time.
 - Click any perspective to inspect its individual journeys and repetitions, with the matching live/final preview.
-- One audit at a time and one reusable browser channel per audit, to respect the H concurrency quota.
+- One audit at a time, one perspective at a time, to respect the H concurrency quota.
+- **Suggested fixes** after each audit: one fix per barrier (WCAG criterion, page, preview CSS/JS and the real
+  code change), with **before/after sliders** rendered as each perspective sees the page. **Evaluate again with
+  fixes** re-runs every perspective with the fixes injected and compares scores (manual, it takes a full audit).
+- **Fix until it passes** (auto mode): audit → fix → re-audit, until every perspective passes or the round limit.
 
 The English interface uses an ivory and indigo theme, responsive layouts and keyboard navigation.
 
@@ -81,6 +85,24 @@ the production frontend or server code.
 
 For broader exploration, select all five personas. Each run allows 35 steps and up to 6 minutes,
 plus browser startup and H scheduling overhead. Use more repetitions to assess variability.
+
+## Fix workflows
+
+Each run saves the rendered HTML of every page the perspective saw. When an audit finishes with failures, a
+fixer turns the barriers and those pages into a patch: one fix per barrier, with a **preview** (CSS and/or JS
+injected into the page by our Chrome, never into the real site) and the **code change** a developer should make.
+
+- **Fixer**: Devin (API v3, structured output) when `DEVIN_API_KEY` and `DEVIN_ORG_ID` are set in `.env`;
+  otherwise hand-written fixes for the demo shop in the same format (`poc/fixes/demo_shop.json`), only for
+  perspectives that failed and only on that site.
+- **Before/after**: the saved page is re-rendered as the persona sees it, without and with the fix, cropped
+  around what changed. Keyboard-only and tremor views add an overlay (Tab order and unreachable controls;
+  targets under 24x24px), since those barriers are invisible in a plain screenshot.
+- **Evaluate again with fixes** creates a linked audit with the patch injected in every page and shows
+  before → after scores. Manual credentials are never stored, so they are asked again.
+- **Fix until it passes** runs rounds in one audit; the Fixes tab shows the score per round and the final fixes.
+
+The same pipeline runs from the command line: `.venv/bin/python poc/pipeline.py --help`.
 
 ## H session quota and stopping
 
@@ -164,6 +186,7 @@ This creates one real audit with two sequential personas using the configured H 
 
 ## Hackathon partner integrations
 
-H computer use is implemented in the product. Linkup journey suggestions and Devin-generated fixes are
-planned, but not wired into this version. Before submission, integrate one required partner or document
+H computer use is implemented in the product. Devin-generated fixes are wired in (`poc/fixes.py`,
+`DevinFixer`) and used when a Devin API key is configured; until then the demo stand-in fixes are used.
+Linkup journey suggestions are planned, not wired in yet. Before submission, integrate one required partner or document
 the team's actual Devin development session/PR; using Codex alone does not satisfy that partner rule.

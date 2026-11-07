@@ -282,6 +282,8 @@ def wait_with_watchdog(handle, total_s: float, tag: str, stall_s: float = STALL_
             return handle.wait_for_completion(timeout_seconds=poll_s)
         except (TimeoutError, httpx.TimeoutException):
             pass
+        except httpx.TransportError:  # network blip (DNS, reset...): not a failed run; the stall check still applies
+            time.sleep(5)
         try:
             steps = handle.status().steps or 0
         except httpx.TransportError:
@@ -365,7 +367,8 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
     task, site = spec["task"], spec["site"]
     out_dir = Path(spec["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
-    tag = f"{task['id']}__{persona.id}__{spec['run_index']}" + (f"__retry{spec['retry']}" if spec.get("retry") else "")
+    tag = (f"{task['id']}__{persona.id}__{spec['run_index']}" + (f"__r{spec['round']}" if spec.get("round") else "")
+           + (f"__retry{spec['retry']}" if spec.get("retry") else ""))
     api_key = os.environ["HAI_API_KEY"]
     os.environ["HAI_AUTO_BRIDGE"] = "0"  # we serve the browser ourselves (PersonaBridge), not the SDK
     auth = site.get("auth") or {}
@@ -379,7 +382,9 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
     started = time.monotonic()
     try:
         chrome = ChromeProcess(port, persona, headless=spec.get("headless", True))
-        devtools = DevToolsController(port, persona, headers=auth.get("headers"))
+        devtools = DevToolsController(port, persona, headers=auth.get("headers"),
+                                      patch_script=spec.get("patch_script"), capture_pages=True)
+        record["patched"] = bool(spec.get("patch_script"))
         devtools.navigate(site["start_url"])
         login_mode = spec.get("login_mode", "tool")  # "tool" (fill_credential) or "vault" (driver vault hook)
         record["login_mode"] = login_mode
@@ -551,6 +556,17 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
         except Exception as exc:
             record["cleanup_error"] = f"bridge: {exc}"
         if devtools is not None:
+            try:  # every page this user saw, as rendered: the input for fix suggestions and before/after images
+                devtools.snapshot_page()
+                snap_dir = out_dir / "snapshots"
+                snap_dir.mkdir(exist_ok=True)
+                record["snapshots"] = []
+                for i, (url, html) in enumerate(devtools.snapshots.items()):
+                    name = f"{tag}__{i}.html"
+                    (snap_dir / name).write_text(html)
+                    record["snapshots"].append({"url": url, "file": f"snapshots/{name}"})
+            except Exception as exc:
+                record["snapshot_error"] = str(exc)
             record["devtools_errors"] = devtools.errors
             try:
                 devtools.close()

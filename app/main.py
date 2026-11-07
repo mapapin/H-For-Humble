@@ -210,6 +210,10 @@ class AuditInput(BaseModel):
     repetitions: int = Field(default=1, ge=1, le=5)
     credentials: Credentials = Field(default_factory=Credentials)
     vault_id: str | None = Field(default=None, max_length=36)
+    # standard: audit, then suggested fixes with before/after images (re-evaluation is a separate, manual step)
+    # auto: audit -> fix -> re-audit with the fixes, until every perspective passes or max_rounds
+    mode: Literal["standard", "auto"] = "standard"
+    max_rounds: int = Field(default=2, ge=1, le=4)
 
     @field_validator("url")
     @classmethod
@@ -311,6 +315,10 @@ def audits(user=Depends(current_user)):
 
 @app.post("/api/audits", status_code=201)
 def create_audit(body: AuditInput, user=Depends(current_user)):
+    return launch_audit(body, user)
+
+
+def launch_audit(body: AuditInput, user, extra: dict | None = None, parent_id: str | None = None):
     credentials = body.credentials
     vault_name = None
     if body.vault_id:
@@ -332,6 +340,10 @@ def create_audit(body: AuditInput, user=Depends(current_user)):
         raise HTTPException(409, "Another audit is active on this local server. Wait for it to finish before starting a new one.")
     audit_id, project_id = str(uuid.uuid4()), str(uuid.uuid4())
     config = body.model_dump(exclude={"credentials"})
+    # Whether access was needed (never the values): a re-evaluation must ask for manual credentials again.
+    config["uses_login"] = bool(credentials.username or credentials.password)
+    config["uses_headers"] = bool(credentials.headers)
+    config.update(extra or {})
     if vault_name:
         config["vault_name"] = vault_name
     for index, task in enumerate(config["tasks"]):
@@ -343,8 +355,8 @@ def create_audit(body: AuditInput, user=Depends(current_user)):
             project_id = row["id"]
         else:
             db.execute("INSERT INTO projects VALUES(?,?,?,?,?)", (project_id, user["id"], host, body.url, time.time()))
-        db.execute("INSERT INTO audits(id,user_id,project_id,name,url,status,created,config) VALUES(?,?,?,?,?,?,?,?)",
-                   (audit_id, user["id"], project_id, body.name, body.url, "queued", time.time(), json.dumps(config)))
+        db.execute("INSERT INTO audits(id,user_id,project_id,name,url,status,created,config,parent_id) VALUES(?,?,?,?,?,?,?,?,?)",
+                   (audit_id, user["id"], project_id, body.name, body.url, "queued", time.time(), json.dumps(config), parent_id))
     auth = {"headers": credentials.headers}
     if credentials.username or credentials.password:
         auth["login"] = {"username": credentials.username, "password": credentials.password}
@@ -364,8 +376,52 @@ def audit_detail(audit_id: str, user=Depends(current_user)):
     audit = owned_audit(audit_id, user)
     with store.connect() as db:
         rows = db.execute("SELECT id,created,kind,message FROM events WHERE audit_id=? ORDER BY id DESC LIMIT 100", (audit_id,)).fetchall()
-    audit["events"] = [dict(row) for row in reversed(rows)]
+        audit["events"] = [dict(row) for row in reversed(rows)]
+        # Re-evaluation links: a child audit re-runs its parent's journeys with the parent's suggested fixes.
+        children = db.execute("SELECT id,name,status,created,summary FROM audits WHERE parent_id=? AND user_id=? "
+                              "ORDER BY created DESC", (audit_id, user["id"])).fetchall()
+        audit["reevaluations"] = [store.serialize(row) for row in children]
+        if audit.get("parent_id"):
+            parent = db.execute("SELECT id,name,summary,fixes FROM audits WHERE id=? AND user_id=?",
+                                (audit["parent_id"], user["id"])).fetchone()
+            audit["parent"] = store.serialize(parent) if parent else None
     return audit
+
+
+class ReevaluateInput(BaseModel):
+    credentials: Credentials = Field(default_factory=Credentials)
+
+
+@app.post("/api/audits/{audit_id}/reevaluate", status_code=201)
+def reevaluate(audit_id: str, body: ReevaluateInput, user=Depends(current_user)):
+    """Run the same journeys and perspectives again, with the suggested fixes injected in every page.
+    Manual on purpose: it re-runs every perspective. The new audit links back to this one for before/after."""
+    parent = owned_audit(audit_id, user)
+    patch = (parent.get("fixes") or {}).get("patch") or {}
+    if parent["status"] not in TERMINAL:
+        raise HTTPException(409, "Wait for this audit to finish before re-evaluating it.")
+    if not patch.get("fixes"):
+        raise HTTPException(409, "This audit has no suggested fixes to evaluate.")
+    cfg = parent["config"]
+    if not cfg.get("vault_id"):
+        if cfg.get("uses_login") and not (body.credentials.username or body.credentials.password):
+            raise HTTPException(422, "Enter the website login again: manual credentials are never stored.")
+        if cfg.get("uses_headers") and not body.credentials.headers:
+            raise HTTPException(422, "Enter the access headers again: manual headers are never stored.")
+    again = AuditInput(name=f"{parent['name']} · with fixes"[:100], url=parent["url"], tasks=cfg["tasks"],
+                       personas=cfg["personas"], repetitions=cfg["repetitions"], vault_id=cfg.get("vault_id"),
+                       credentials=body.credentials if not cfg.get("vault_id") else Credentials())
+    return launch_audit(again, user, extra={"patch": patch, "mode": "standard"}, parent_id=audit_id)
+
+
+@app.get("/api/audits/{audit_id}/fixes/{filename}")
+def fix_image(audit_id: str, filename: str, user=Depends(current_user)):
+    audit = owned_audit(audit_id, user)
+    allowed = {name for c in (audit.get("fixes") or {}).get("comparisons", []) for name in (c.get("before"), c.get("after"))}
+    path = store.DATA / "audits" / audit_id / "fixes" / filename
+    if filename not in allowed or Path(filename).name != filename or not filename.endswith(".png") or not path.is_file():
+        raise HTTPException(404, "Image not found.")
+    return FileResponse(path, media_type="image/png")
 
 
 @app.get("/api/audits/{audit_id}/events")
