@@ -36,6 +36,14 @@ async def lifespan(app):
     store.init()
     with store.connect() as db:
         db.execute("UPDATE audits SET status='failed', error='The server restarted during this audit. Check H Agent View for any remaining session before retrying.', finished=? WHERE status IN ('running','paused','stopping','queued')", (time.time(),))
+        # Audits from before product scores existed: score them from their saved runs.
+        from scoring import scorecard
+        for row in db.execute("SELECT id, results, config FROM audits WHERE (scores IS NULL OR scores='{}') AND results!='[]'").fetchall():
+            try:
+                card = scorecard(json.loads(row["results"]), json.loads(row["config"]).get("personas"))
+                db.execute("UPDATE audits SET scores=? WHERE id=?", (json.dumps(card), row["id"]))
+            except Exception:
+                pass
     yield
     await asyncio.to_thread(manager.shutdown)
 

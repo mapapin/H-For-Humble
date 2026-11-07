@@ -141,8 +141,8 @@ class CannedFixer:
                                     for p in patches if p.get("fixes")}}
 
     def generate(self, records: list[dict], rows: list[dict], base_dir: str | Path, site: dict,
-                 previous: dict | None = None) -> dict:
-        failing = set(failing_personas(rows))
+                 previous: dict | None = None, personas: list[str] | None = None) -> dict:
+        failing = set(personas if personas is not None else failing_personas(rows))
         done = {f["id"] for f in (previous or {}).get("fixes", [])}
         origin = urlparse(site["start_url"]).netloc  # canned fixes are written for one site only
         new = [f for f in self.patch["fixes"] if f["id"] not in done and failing & set(f["personas"])

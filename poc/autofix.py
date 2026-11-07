@@ -214,6 +214,19 @@ RULES = {
 }
 
 
+def needs_fix(records: list[dict], rows: list[dict], struggle_score: int = 80) -> list[str]:
+    """Perspectives worth a fix: those that could not complete the journey, plus those that completed it with a
+    poor score and reported barriers (they got through, at a cost real users often would not pay)."""
+    from scoring import scorecard
+
+    out = set(failing_personas(rows))
+    for persona, p in scorecard(records).get("perspectives", {}).items():
+        if persona != "baseline" and p["score"] is not None and p["score"] < struggle_score and p["barriers"]:
+            out.add(persona)
+    out.discard("baseline")
+    return sorted(out)
+
+
 def stuck_page(records: list[dict], persona: str, fallback: str) -> str:
     """The last page a persona saw in a failed run: where the before/after image is taken."""
     for r in records:
@@ -228,7 +241,7 @@ class RuleFixer:
     def generate(self, records: list[dict], rows: list[dict], base_dir, site: dict, previous: dict | None = None,
                  personas: list[str] | None = None) -> dict:
         done = {f["id"] for f in (previous or {}).get("fixes", [])}
-        failing = personas if personas is not None else failing_personas(rows)
+        failing = personas if personas is not None else needs_fix(records, rows)
         fixes = []
         for persona in failing:
             rule = RULES.get(persona)
@@ -251,10 +264,11 @@ class CompositeFixer:
         self.canned, self.rules = canned, rules or RuleFixer()
 
     def generate(self, records, rows, base_dir, site, previous=None) -> dict:
-        first = self.canned.generate(records, rows, base_dir, site, previous) if self.canned else {"fixes": []}
+        targets = needs_fix(records, rows)
+        first = self.canned.generate(records, rows, base_dir, site, previous, personas=targets) if self.canned else {"fixes": []}
         covered = {p for f in first["fixes"] for p in f["personas"]}
         covered |= {p for f in (previous or {}).get("fixes", []) for p in f.get("personas", [])}
-        rest = [p for p in failing_personas(rows) if p not in covered]
+        rest = [p for p in targets if p not in covered]
         second = self.rules.generate(records, rows, base_dir, site, previous, personas=rest)
         fixes = first["fixes"] + second["fixes"]
         sources = {f.get("source", "canned") for f in fixes}

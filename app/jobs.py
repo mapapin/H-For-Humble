@@ -56,6 +56,7 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
     from pipeline import passes, persona_rates, score, suggest_fixes
     from render import build_comparisons
     from scoring import scorecard
+    from autofix import needs_fix
 
     terminal_message = None
     lock = threading.Lock()
@@ -213,7 +214,7 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
                 comparisons = build_comparisons(first_round, out_dir, patch, fix_dir, headers=credentials.get("headers"))
                 emit("fixes", fixes={"source": fixer.source, "patch": patch, "comparisons": comparisons,
                                      "new_fix_ids": [f["id"] for f in patch["fixes"]], "created": time.time()})
-            elif not auto and not config.get("patch") and any((r.get("success_rate") or 0) < 1 for r in rows):
+            elif not auto and not config.get("patch") and needs_fix(round_records, rows):
                 # (a re-evaluation compares with its parent audit instead: its snapshots already include the fixes)
                 emit("progress", message="Asking for fix suggestions and rendering before/after images.")
                 sug = suggest_fixes(round_records, rows, out_dir, site, fixer, previous=config.get("patch"),
