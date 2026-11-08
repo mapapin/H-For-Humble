@@ -52,7 +52,7 @@ export function ReplayDialog({ audit, run, close, others = [], open }: { audit: 
       <header className="replay-head">
         <PersonaIcon id={run.persona} size={18} />
         <div><h2>{pname(run.persona)} <span className={`outcome-chip ${technical(run) ? 'error' : run.success ? 'pass' : 'fail'}`}>{outcomeLabel(run)}</span></h2>
-          <p>{task?.title || run.task}{audit.config.repetitions > 1 ? ` · run ${run.run + 1}` : ''} · {run.steps ?? steps.length} steps · {duration(run.agent_duration_s)}{blockedCount ? ` · ${blockedCount} mouse action${blockedCount > 1 ? 's' : ''} blocked` : ''}{jitterCount ? ` · ${jitterCount} click${jitterCount > 1 ? 's' : ''} shaken by tremor` : ''}</p></div>
+          <p>{task?.title || run.task}{audit.config.repetitions > 1 ? ` · run ${run.run + 1}` : ''} · {run.steps ?? steps.length} steps · {duration(run.agent_duration_s)}{blockedCount ? ` · ${blockedCount} mouse action${blockedCount > 1 ? 's' : ''} blocked` : ''}{jitterCount ? ` · ${jitterCount} click${jitterCount > 1 ? 's' : ''} shaken by tremor` : ''}{run.assisted ? ' · assisted (you sent a hint)' : ''}</p></div>
         <div className="replay-head-actions">
           {others.length > 1 && open && <select aria-label="Replay another perspective" value={run.tag} onChange={e => { const next = others.find(o => o.tag === e.target.value); if (next) open(next); }}>{others.map(o => <option key={o.tag} value={o.tag}>{pname(o.persona)}{audit.config.repetitions > 1 ? ` · run ${o.run + 1}` : ''}</option>)}</select>}
           {run.agent_view_url && <a className="button secondary" href={run.agent_view_url} target="_blank" rel="noreferrer">H Agent View<ArrowUpRight size={14} /></a>}

@@ -274,6 +274,7 @@ class JobManager:
         self.ctx = mp.get_context("spawn")
         self.lock = threading.Lock()
         self.current = None
+        self.assisted: set[str] = set()  # H session ids a user steered (their runs are marked as assisted)
 
     def start(self, audit_id, config, credentials):
         with self.lock:
@@ -368,6 +369,8 @@ class JobManager:
                     store.update(audit_id, progress=progress)
                 elif kind == "run_finished":
                     r = item["record"]
+                    if r.get("session_id") in self.assisted:
+                        r["assisted"] = True
                     records.append(r)
                     progress["completed"] = item["completed"]
                     if lane is not None:

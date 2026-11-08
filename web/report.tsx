@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { AlertOctagon, ArrowUpRight, BookOpenCheck, CircleCheck, CircleX, Clock3, Footprints, Info, Loader2, Play, Radio, Scale, TriangleAlert, X } from 'lucide-react';
-import { Dialog, duration, PERSONAS, pname, PersonaIcon, ScoreRing, technical, terminal } from './shared';
+import { AlertOctagon, ArrowUpRight, BookOpenCheck, CircleCheck, CircleX, Clock3, Footprints, Info, Loader2, Play, Radio, Scale, Send, TriangleAlert, X } from 'lucide-react';
+import { api, Dialog, duration, PERSONAS, pname, PersonaIcon, ScoreRing, technical, terminal } from './shared';
 import type { Audit, Lane, PerspectiveScore, Run } from './shared';
 
 const short = (id: string) => PERSONAS.find(p => p.id === id)?.short || '';
@@ -85,8 +85,24 @@ function LiveDialog({ audit, persona, close }: { audit: Audit; persona: string; 
       <div className="replay-head-actions">{l?.agent_view_url && <a className="button secondary" href={l.agent_view_url} target="_blank" rel="noreferrer">H Agent View<ArrowUpRight size={14} /></a>}<button className="icon-button" aria-label="Close live view" onClick={close}><X size={18} /></button></div></header>
     <div className="live-dialog-body">{src ? <img src={src} alt={`Live browser of the ${pname(persona)} agent`} /> : <div className="p-screen-empty"><Loader2 className="spin" size={20} /><span>Waiting for the first screen…</span></div>}
       <div className="replay-caption" aria-live="polite"><span className="step-no">Step {l?.step || 0}</span><div><p>{l?.thought || l?.message || 'Connecting to H…'}</p>{l?.action && <span className="action-chip">{l.action}</span>}</div></div></div>
+    {l?.state === 'running' && l.session_id && lane && <SteerBox audit={audit} laneId={lane[0]} />}
     {l?.state === 'finished' && <p className="quiet-note">This run has finished. Close this view to open its replay.</p>}
   </div></Dialog>;
+}
+
+/** Steer one agent mid-run (H session message). Honest by default: the run is then marked as assisted. */
+function SteerBox({ audit, laneId }: { audit: Audit; laneId: string }) {
+  const [text, setText] = useState(''), [busy, setBusy] = useState(false), [note, setNote] = useState('');
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    if (text.trim().length < 2) return;
+    setBusy(true); setNote('');
+    try { await api(`/audits/${audit.id}/lanes/${laneId}/steer`, { method: 'POST', body: JSON.stringify({ message: text.trim() }) }); setNote('Sent. The agent reads it at its next step; this run is now marked as assisted.'); setText(''); }
+    catch (err) { setNote((err as Error).message); } finally { setBusy(false); }
+  }
+  return <form className="steer-box" onSubmit={send}><label htmlFor="steer-text">Steer this agent</label>
+    <div><input id="steer-text" value={text} onChange={e => setText(e.target.value)} maxLength={500} placeholder="e.g. The dates may react to the arrow keys" /><button className="button secondary" disabled={busy || text.trim().length < 2}>{busy ? <Loader2 className="spin" size={14} /> : <Send size={14} />}Send</button></div>
+    <small>{note || 'A hint changes what is measured: the run will be marked as assisted in the report.'}</small></form>;
 }
 
 function PerspectiveTile({ audit, persona, onReplay, onWatch }: { audit: Audit; persona: string; onReplay: (r: Run) => void; onWatch: () => void }) {
@@ -121,6 +137,7 @@ function PerspectiveTile({ audit, persona, onReplay, onWatch }: { audit: Audit; 
         <div><dt>Barriers</dt><dd>{score.barriers}</dd></div>
         <div><dt>Score</dt><dd><b>{score.score ?? '—'}</b></dd></div>
       </dl>}
+      {records.some(r => r.assisted) && <span className="outcome-chip neutral" title="You sent this agent a hint during the run">Assisted</span>}
       {planned > 1 && <small className="p-count">{records.length}/{planned} runs</small>}
     </footer>
   </article>;

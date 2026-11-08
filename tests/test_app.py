@@ -171,5 +171,25 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/vault").json(), [])
 
 
+
+def test_steer_requires_a_running_agent_and_marks_the_session(self):
+    from app.jobs import manager
+    self.register()
+    audit = self.create_audit()
+    r = self.client.post(f"/api/audits/{audit['id']}/lanes/0/steer", json={"message": "Try the arrow keys"})
+    self.assertEqual(r.status_code, 409, r.text)
+    store.update(audit["id"], status="running", progress={"lanes": {"0": {"state": "running", "session_id": "sess-1", "persona": "keyboard_only"}}})
+    with patch("hai_agents.Client") as client:
+        r = self.client.post(f"/api/audits/{audit['id']}/lanes/0/steer", json={"message": "Try the arrow keys"})
+    self.assertEqual(r.status_code, 200, r.text)
+    self.assertIn("sess-1", manager.assisted)
+    sent = client.return_value.__enter__.return_value.sessions.send_session_messages.call_args
+    self.assertEqual(sent.args[0], "sess-1")
+    self.assertEqual(sent.kwargs["request"].message, "Try the arrow keys")
+
+
+AppTests.test_steer_requires_a_running_agent_and_marks_the_session = test_steer_requires_a_running_agent_and_marks_the_session
+
+
 if __name__ == "__main__":
     unittest.main()

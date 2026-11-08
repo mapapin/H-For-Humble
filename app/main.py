@@ -498,6 +498,32 @@ def export(audit_id: str, user=Depends(current_user)):
                     headers={"Content-Disposition": f'attachment; filename="humble-audit-{audit_id[:8]}.json"'})
 
 
+class SteerInput(BaseModel):
+    message: str = Field(min_length=2, max_length=500)
+
+
+@app.post("/api/audits/{audit_id}/lanes/{lane_id}/steer")
+def steer(audit_id: str, lane_id: str, body: SteerInput, user=Depends(current_user)):
+    """Send a message to one running agent (H steering). The run is then marked as assisted."""
+    audit = owned_audit(audit_id, user)
+    lane = ((audit.get("progress") or {}).get("lanes") or {}).get(lane_id) or {}
+    if audit["status"] in TERMINAL or lane.get("state") != "running" or not lane.get("session_id"):
+        raise HTTPException(409, "This agent is not running.")
+    from hai_agents import Client
+    from hai_agents.sessions.types.send_session_messages_request_body import SendSessionMessagesRequestBody_UserMessage
+    try:
+        with Client() as client:
+            client.sessions.send_session_messages(
+                lane["session_id"], request=SendSessionMessagesRequestBody_UserMessage(message=body.message.strip()),
+                request_options={"timeout_in_seconds": 15, "max_retries": 1})
+    except Exception:
+        raise HTTPException(502, "H did not accept the message. Try again.")
+    manager.assisted.add(lane["session_id"])
+    persona = (lane.get("persona") or "").replace("_", " ").capitalize()
+    store.event(audit_id, "steer", f"{persona}: you sent “{body.message.strip()[:200]}”. This run is now marked as assisted.")
+    return {"ok": True}
+
+
 @app.get("/api/audits/{audit_id}/report.html")
 def export_html(audit_id: str, user=Depends(current_user)):
     """A self-contained HTML report (images and replays embedded) that opens anywhere, offline."""
