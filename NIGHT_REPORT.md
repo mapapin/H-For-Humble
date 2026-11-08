@@ -59,7 +59,17 @@ show finished audits and replays (the report is fully usable offline).
 | **mousquetaires.com** (real site) | 5 fixes in 570 s: keyboard-operable mega-menu (Space/Arrow/Escape), brand links shown directly in the 200% zoom menu, links to each brand page. | **58 → 79/B: every perspective completes** on the real site (keyboard-only and low vision were blocked). |
 
 The API has no model field, only `devin_mode` (`normal`, `fast`, `ultra`, `fusion`, `lite`, `swe-2-*`). Humble uses
-`fast` by default (`DEVIN_MODE`). Mode comparison on the same Lune task: see below.
+`fast` by default (`DEVIN_MODE`). Mode comparison: same Lune round-1 task, each patch re-tested by the five agents
+(one run per mode, so treat small gaps as noise):
+
+| `devin_mode` | Time | Fixes | Re-test score | Keyboard-only |
+|---|---|---|---|---|
+| **fast** | **112 s** | 6 | **80/B** | **completes** (the calendar became a single Tab stop with arrow keys) |
+| normal | 287 s | 6 | 74/C | blocked (every date a Tab stop; fixed by a second round → 86) |
+| ultra | 459 s | 5 | 74/C | blocked |
+| fusion | 128 s | 5 | 71/C | blocked |
+
+`fast` was both the quickest and the only one to fix keyboard access in one round, so it stays the default.
 
 ## Results (real H runs)
 
@@ -89,7 +99,7 @@ The API has no model field, only `devin_mode` (`normal`, `fast`, `ultra`, `fusio
 | `0c1171eb` Mugs & Co (39/F) | Axe flags 1 rule vs 3 perspectives blocked |
 
 Open them at `http://127.0.0.1:8000/#audit/<full id>` (the home list shows them first). Candidates to delete (new
-trash icon on a finished report, H-stall experiments): `95f04682`, `445f4316`, `4179b8af`, `f231a977`, `15db7bb5`,
+trash icon on a finished report, H-stall experiments and the three "Devin mode test" clones): `95f04682`, `445f4316`, `4179b8af`, `f231a977`, `15db7bb5`,
 `cd748705` (old calendar layout), `2739939f` (superseded by `22beea7b`), `a7d13564` (auto-mode experiment on the real
 site, honest but confusing in a demo).
 
