@@ -15,7 +15,7 @@ Traps (all on /workshops/<slug> unless noted):
 - Colour blind (WCAG 1.4.1): date availability is shown ONLY by the chip colour, green #419f51 = available,
   red #cf5f59 = sold out. The pair has the same luminance and maps to the same colour under deuteranopia
   (Chrome's Machado matrix). No text, icon or pattern; the legend is colour-only too. The first eight December
-  sessions are sold out (first available: Thu 10 Dec). Sold-out chips still look clickable and can be selected;
+  sessions are sold out (first available: Tue 8 Dec). Sold-out chips still look clickable and can be selected;
   the booking card does not say anything, and the checkout then shows a waitlist request with
   "Total due today EUR 0.00" instead of EUR 98.00.
 - Hand tremor (WCAG 2.5.8): the seats stepper "- +" buttons are 14x14 px with a 1 px divider, and the date chips
@@ -84,7 +84,8 @@ WORKSHOPS: dict[str, dict] = {
         "lede": "Two and a half hours at the wheel to centre clay, pull your first walls and throw two bowls "
                 "to take home. Small group, two teachers, no experience needed.",
         "times": ("18:30", "21:00", "10:30", "13:00"),
-        "full": {1, 2, 3, 4, 5, 6, 8, 9, 12, 13, 19, 20, 26, 27},
+        # the whole first week sold out; first open date: Tue 8 Dec, first cell of the second calendar row
+        "full": {1, 2, 3, 4, 5, 6, 12, 13, 19, 20, 26, 27},
         "closed": _studio_closed,
     },
     "hand-building": {

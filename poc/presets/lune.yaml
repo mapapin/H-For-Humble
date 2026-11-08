@@ -22,6 +22,6 @@ tasks:
       Book 2 seats for the "Wheel throwing for beginners" workshop on the first available date in December,
       go to the checkout page and report the total price shown there. Do not pay.
     # the total AND the first available date (Thu 10 Dec): booking a later open date is not the goal
-    expect_answer_contains: "98.00; 10 Dec|December 10|10 décembre|10/12"
+    expect_answer_contains: "98.00; 8 Dec|8 December|December 8|8 décembre|08/12"
     max_steps: 35
     max_time_s: 480

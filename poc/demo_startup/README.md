@@ -18,7 +18,7 @@ Options (env): `LUNE_TOKEN=tok` requires `X-Audit-Token: tok` on every request (
 
 Task `book-wheel-throwing` (poc/presets/lune.yaml): book 2 seats for "Wheel throwing for beginners" on the first
 available December date, go to checkout, report the total. **Expected answer: Total €98.00** (2 × €49).
-Baseline path, about 6 actions: landing → workshop card → first green date (Thu 10 Dec) → `+` → Reserve → read the
+Baseline path, about 6 actions: landing → workshop card → first green date (Tue 8 Dec) → `+` → Reserve → read the
 total on `/checkout`. The workshop page shows the total as "€98" (no decimals), so only the checkout matches
 `98.00`.
 
@@ -29,7 +29,7 @@ Pages: `/` landing, `/workshops/<slug>` (wheel-throwing, hand-building, glaze-la
 
 | Persona | Barrier (WCAG) | Where | What happens |
 |---|---|---|---|
-| Colour blind | 1.4.1 Use of Color | date strip | Available `#419f51` and sold out `#cf5f59` differ only by hue (same luminance, identical under Chrome's deuteranopia filter); no text, icon or pattern, colour-only legend. Dec 1–9 are sold out. A sold-out date can still be selected and the booking card says nothing; checkout then shows a **waitlist request, "Total due today €0.00"**. |
+| Colour blind | 1.4.1 Use of Color | date strip | Available `#419f51` and sold out `#cf5f59` differ only by hue (same luminance, identical under Chrome's deuteranopia filter); no text, icon or pattern, colour-only legend. Dec 1–6 (the whole first week) are sold out. A sold-out date can still be selected and the booking card says nothing; checkout then shows a **waitlist request, "Total due today €0.00"**. |
 | Hand tremor | 2.5.8 Target Size | booking card, date strip | Seat stepper `−` `+` are 14×14 px touching each other (1 px divider); date chips are 18×18 px with 2 px gaps. ±10 px jitter misses often or hits `−` instead of `+`. Date chips are `<div>`s, so there is no keyboard fallback for them. |
 | Keyboard only | 2.1.1 Keyboard, 2.4.7 Focus Visible | date strip, Reserve | Date chips and Reserve are `<div onclick>`: never focused, Enter does nothing. `*:focus { outline: none }` site-wide (the landing page styles its own links and cards on `:focus`, so the user does reach the workshop page). |
 | Low vision | 1.4.10 Reflow | workshop page | Fixed 1240 px grid inside `overflow-x: clip`, `overflow-x: hidden` on html/body. At 200% zoom (viewport 640 px) the whole booking card (seats, total, Reserve) is cut off; it cannot be scrolled to, and focusing `+` does not scroll either. |

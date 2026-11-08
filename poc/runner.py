@@ -505,10 +505,16 @@ class BridgeThread:
 def answer_matches(answer: str, expected: str) -> bool:
     """Expected answer syntax: facts separated by ';' must all appear; alternatives within a fact are separated by
     '|'. E.g. '98.00; 10 Dec|December 10' = the total and the date. Case-insensitive, spaces normalised."""
+    import re
+
     text = " ".join(answer.lower().split())
+
+    def found(option: str) -> bool:  # whole words/numbers only: "8 dec" must not match "18 dec"
+        return re.search(r"(?<!\w)" + re.escape(option) + r"(?!\w)", text) is not None
+
     for fact in expected.split(";"):
         options = [" ".join(o.lower().split()) for o in fact.split("|") if o.strip()]
-        if options and not any(o in text for o in options):
+        if options and not any(found(o) for o in options):
             return False
     return True
 

@@ -50,9 +50,14 @@ if __name__ == "__main__":
 class AnswerTests(unittest.TestCase):
     def test_all_facts_with_alternatives(self):
         from runner import answer_matches
-        spec = "98.00; 10 Dec|December 10"
+        spec = "98.00; 10 Dec|10 December|December 10"
         self.assertTrue(answer_matches("Total €98.00 for Thursday 10 December 2026", spec))
         self.assertTrue(answer_matches("Booked December 10: total 98.00", spec))
         self.assertFalse(answer_matches("Total €98.00 on Tuesday 15 December", spec))
         self.assertFalse(answer_matches("Thu 10 Dec, total €49.00", spec))
         self.assertTrue(answer_matches("Order total €19.90", "19.90"))
+        spec8 = "98.00; 8 Dec|8 December|December 8"
+        self.assertTrue(answer_matches("Tuesday 8 December 2026, total €98.00", spec8))
+        self.assertTrue(answer_matches("Tue 8 Dec · 18:30 — €98.00", spec8))
+        self.assertFalse(answer_matches("Friday 18 December, total €98.00", spec8))
+        self.assertFalse(answer_matches("Total €198.00 on 8 Dec", spec8))
