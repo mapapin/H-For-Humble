@@ -11,6 +11,12 @@ import { CredentialVault } from './vault';
 
 type Suggestion = { site_name: string; what_it_is: string; journeys: { title: string; goal: string; why?: string }[]; accessibility_statement_url?: string; declared_compliance?: string; sources?: { name?: string; url: string }[] };
 
+/** One-click demo: the Lune booking journey (poc/presets/lune.yaml), every perspective. */
+const LUNE_DEMO = { name: 'Lune · book a pottery workshop', url: 'http://127.0.0.1:8770/', config: {
+  personas: PERSONAS.map(p => p.id), repetitions: 1, mode: 'standard', max_rounds: 2,
+  tasks: [{ title: 'Book 2 seats for wheel throwing', goal: 'Book 2 seats for the "Wheel throwing for beginners" workshop on the first available date in December, go to the checkout page and report the total price shown there. Do not pay.', expect_answer_contains: '98.00; 8 Dec|8 December|December 8|8 décembre|08/12' }],
+} } as unknown as Audit;
+
 function Auth({ onLogin }: { onLogin: (user: User) => void }) {
   const [register, setRegister] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -70,7 +76,8 @@ function App() {
         {(page === 'overview' || page === 'history') && <>
           <section className="home-hero"><div className="home-hero-copy"><div className="eyebrow">SYNTHETIC USERS · REAL BROWSERS · H AGENTS</div><h1>See your site through <em>five different users.</em></h1><p>H computer-use agents run your key journeys in parallel, each with an impairment applied to its browser: low vision, colour blindness, hand tremor, keyboard only. You get a score, replays of where they got stuck, and fixes you can preview and re-test.</p></div>
             <form className="home-start" onSubmit={e => { e.preventDefault(); openNew(undefined, startUrl); }}><label className="sr-only" htmlFor="start-url">Website URL</label><div className="input-icon"><Globe2 size={17} /><input id="start-url" type="url" value={startUrl} onChange={e => setStartUrl(e.target.value)} placeholder="https://your-product.com" required /></div><button className="button primary">Audit this site<ArrowRight size={16} /></button></form>
-            <div className="home-personas" aria-hidden="true">{PERSONAS.map(p => <span key={p.id}><PersonaIcon id={p.id} size={14} />{p.name}</span>)}</div></section>
+            <div className="home-personas" aria-hidden="true">{PERSONAS.map(p => <span key={p.id}><PersonaIcon id={p.id} size={14} />{p.name}</span>)}</div>
+            <p className="home-demo">No site at hand? <button className="text-button" onClick={() => openNew(LUNE_DEMO)}>Try it on Lune, our demo startup<ArrowRight size={13} /></button> <small>(run <code>poc/demo_startup/server.py --port 8770</code> first)</small></p></section>
           {!listed && <div className="loading-panel"><Spinner />Loading your audits…</div>}
           {audits.length > 0 && <section className="section"><div className="section-heading"><div><h2>Your audits <span className="number-pill">{audits.length}</span></h2></div><SearchBox value={query} onChange={setQuery} placeholder="Search by name or website…" /></div><AuditTable audits={filtered} onOpen={id => go(`audit/${id}`)} onNew={() => openNew()} searching={!!query} /></section>}
         </>}

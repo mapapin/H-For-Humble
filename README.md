@@ -55,10 +55,10 @@ Two deliberately inaccessible demo sites are included:
 
 1. Do the quick start, start Lune (`poc/demo_startup/server.py --port 8770`) and open http://127.0.0.1:8000.
    Create a local account.
-2. Type `http://127.0.0.1:8770/` in **Audit this site**. Journey: *Book 2 seats for the "Wheel throwing for
-   beginners" workshop on the first available date in December, go to the checkout page and report the total
-   price shown there. Do not pay.* Expected answer: `98.00; 8 Dec|8 December|December 8` (the total *and* the
-   first open date). Keep the five perspectives. Launch.
+2. Click **Try it on Lune, our demo startup** under the home URL field: the journey is filled in (*book 2 seats
+   for "Wheel throwing for beginners" on the first available date in December and report the total*; expected
+   answer `98.00; 8 Dec|8 December|December 8`, the total *and* the first open date). Keep the five perspectives.
+   Launch.
 3. Watch the five agents work side by side (click a live tile to watch one full size, or open it in H Agent View).
    An audit takes 2 to 6 minutes.
 4. Read the verdict, open the replays (keyboard-only gives up on the date picker; low vision cannot reach the
