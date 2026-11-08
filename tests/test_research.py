@@ -40,3 +40,11 @@ class ResearchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ResilienceTests(unittest.TestCase):
+    def test_failed_search_still_reads_the_statement(self):
+        with patch("research._search", side_effect=RuntimeError("400")), patch("research.fetch_markdown", return_value=FR):
+            got = site_context("https://www.example.fr/")
+        self.assertEqual(got["declared_compliance"], "Partially compliant with RGAA 4.1.2 (69% of applicable criteria met)")
+        self.assertEqual(got["organisation"], "www.example.fr")

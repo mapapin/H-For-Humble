@@ -170,7 +170,10 @@ def site_context(url: str) -> dict[str, Any] | None:
          "accessibility statement), the compliance level it declares (RGAA or WCAG, percentage if given), the date "
          "and whether the audit was internal. Also which accessibility laws apply to this kind of service in its "
          "market (for example the European Accessibility Act, French RGAA obligations).")
-    data = _search(q, CONTEXT_SCHEMA) or {}
+    try:
+        data = _search(q, CONTEXT_SCHEMA) or {}
+    except Exception:  # a failed search still leaves the statement itself (fetched below) to read
+        data = {}
     # Read the statement itself (Linkup fetch) for the exact declared level, rather than a paraphrase.
     candidates = [data.get("accessibility_statement_url")] if data.get("accessibility_statement_url") else []
     origin = f"{urlsplit(url).scheme}://{urlsplit(url).netloc}"
@@ -192,4 +195,6 @@ def site_context(url: str) -> dict[str, Any] | None:
                         known_issues=found.get("known_issues", []), declared_rate=found.get("rate"),
                         self_assessed=found.get("self_assessed", data.get("self_assessed")))
             break
+    if data and not data.get("organisation"):
+        data["organisation"] = urlsplit(url).hostname
     return {**data, "source": "linkup", "url": url} if data else None
