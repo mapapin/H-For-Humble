@@ -11,9 +11,19 @@ cd H-For-Humble
 npm run build && npm start                                     # app on http://127.0.0.1:8000
 ```
 
-- Check H slots in the app (Environment > Check live H quota): 10 free means 5 agents in parallel.
-- Keep two finished audits open in tabs as a fallback (a Lune audit and its re-evaluation with fixes), so the story
-  never depends on a live run finishing on time.
+- Run `.venv/bin/python scripts/preflight.py`: app, demo sites, Chrome, H slots, and any H session stuck in
+  "running" (stop those in H Agent View first, they hold slots). 10 free slots = 5 agents in parallel.
+- Keep finished audits open in tabs as a fallback (a Lune audit, its re-evaluation with fixes, mousquetaires.com),
+  so the story never depends on a live run finishing on time.
+
+## Plan B (if H is slow or sessions hang)
+
+Overnight, H sometimes never started the first step of sessions launched seconds apart (they stay "running" at
+step 0 and hold slots). Humble starts agents one after another, detects a session without a first step, retries
+once and lists stuck sessions with their Agent View links. If it happens on stage:
+1. Say it: "H didn't start this agent; Humble detected it and retried" (that is the reliability story).
+2. Switch to a finished audit tab: score, replays and before/after work fully offline.
+3. The sample reports in `docs/` open in any browser without the app.
 
 ## The story
 
