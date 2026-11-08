@@ -2,3 +2,6 @@
 fastapi>=0.115,<1
 uvicorn>=0.31,<1
 cryptography>=43,<51
+# scripts/montage.py (MP4 montage of a finished audit)
+imageio>=2.31
+imageio-ffmpeg>=0.5
