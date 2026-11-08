@@ -52,9 +52,10 @@ card: *axe-core flags N rules on these pages; our agents found 3 perspectives bl
 **6. Replays (20 s).** Open the keyboard-only replay: keycaps, "Mouse blocked", the agent's own words when it gives
 up. Open the tremor replay: the target ring and the red dot where the click actually landed.
 
-**7. Fixes (25 s).** Fixes tab: drag the before/after slider "through their eyes" (dates with "Sold out" labels as
+**7. Fixes, written by Devin (25 s).** Fixes tab: drag the before/after slider "through their eyes" (dates with "Sold out" labels as
 the colour-blind user sees them; Reserve button reachable and focused for keyboard users). Click "Evaluate again
-with fixes" (or open the finished re-evaluation): score jumps to 100, every perspective completes.
+with fixes" (or open the finished re-evaluation): with Devin's fixes Lune goes 49 → 86, every perspective
+completes; a second Devin round fixed what the first one missed (the calendar was 25 Tab stops long).
 
 **8. Real website (15 s).** mousquetaires.com: "Suggest journeys" (Linkup finds what visitors do there and the
 site's own accessibility statement: *partially compliant, RGAA 4, self-assessed*), then the finished audit with the
@@ -77,6 +78,8 @@ eyes. Humble turns that into a score, replays and fixes your team can ship."
 
 ## Recorded results
 
+- **Devin's fixes, verified by the agents**: Lune 49 → 74 (round 1) → **86, all five complete** (round 2);
+  mousquetaires.com 58 → **79, all five complete** (keyboard-only and low vision unblocked on a real site).
 - **Lune** (final version, first open date Tue 8 Dec): **49/D**. Baseline 6 steps, tremor completes; colour blind books a
   sold-out date, discovers the waitlist at checkout and needs 15 steps; low vision and keyboard-only are blocked.
   axe-core: 4 rules, none for those blockers. **With the 4 fixes: 85/B, all five perspectives complete.**

@@ -51,6 +51,16 @@ To try it: `git checkout humble-v2 && npm install && npm run build && npm start`
 Workarounds are in place (see Reliability), but a fully parallel live demo depends on (1) being fixed. Plan B:
 show finished audits and replays (the report is fully usable offline).
 
+## Devin writes the fixes (09:20–09:45, after you added the key)
+
+| Site | Devin | Re-tested by the agents |
+|---|---|---|
+| **Lune** | Round 1: 6 fixes in 287 s (normal mode). Round 2, given what still failed: 3 fixes in 143 s (fast mode): calendar as a single Tab stop with arrow keys, sold-out dates out of the Tab order, clearer selection feedback. | **49 → 74** after round 1 (low vision and colour blind unblocked), **→ 86/B after round 2: every perspective completes**, keyboard-only included. |
+| **mousquetaires.com** (real site) | 5 fixes in 570 s: keyboard-operable mega-menu (Space/Arrow/Escape), brand links shown directly in the 200% zoom menu, links to each brand page. | **58 → 79/B: every perspective completes** on the real site (keyboard-only and low vision were blocked). |
+
+The API has no model field, only `devin_mode` (`normal`, `fast`, `ultra`, `fusion`, `lite`, `swe-2-*`). Humble uses
+`fast` by default (`DEVIN_MODE`). Mode comparison on the same Lune task: see below.
+
 ## Results (real H runs)
 
 | Audit | Outcome |
@@ -85,6 +95,4 @@ site, honest but confusing in a demo).
 
 ## Not done / next
 
-- Devin: no Devin API key in `~/Documents/h_company`, so `DevinFixer` is still untested (the UI and pipeline
-  accept it as soon as `DEVIN_API_KEY` and `DEVIN_ORG_ID` are set).
 - Gladia: not used (Linkup covers the partner requirement).
