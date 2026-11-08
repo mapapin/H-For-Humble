@@ -1,4 +1,4 @@
-"""Opt-in integration test: creates ONE real H audit, sequentially (baseline + keyboard).
+"""Opt-in integration test: creates ONE real H audit (baseline + keyboard only, in parallel).
 
 Start the app and demo shop first. This consumes H credits. No credentials are printed.
 """
@@ -41,8 +41,11 @@ def main():
                     assert data["status"] == "completed", "Audit failed"
                     assert len(data["results"]) == 2
                     assert all(r.get("final_screenshot") for r in data["results"])
-                    assert data["results"][0]["success"], "Baseline did not achieve the expected answer"
-                    print("PASS: real H audit, persisted results, screenshots and comparison report.", flush=True)
+                    baseline = next(r for r in data["results"] if r["persona"] == "baseline")
+                    assert baseline["success"], "Baseline did not achieve the expected answer"
+                    assert data.get("scores", {}).get("perspectives", {}).get("baseline"), "No score computed"
+                    assert baseline.get("replay", {}).get("steps"), "No replay recorded"
+                    print("PASS: real H audit in parallel lanes, persisted results, screenshots, scores and replays.", flush=True)
                     return
                 time.sleep(4)
             raise TimeoutError("Live audit exceeded test deadline")
