@@ -88,7 +88,9 @@ def _search(q: str, schema: dict, depth: str = "standard") -> dict[str, Any] | N
     r.raise_for_status()
     body = r.json()
     data = body.get("data") if isinstance(body.get("data"), dict) else body
-    sources = [{"name": s.get("name"), "url": s.get("url")} for s in body.get("sources") or [] if s.get("url")][:6]
+    import html as _html
+    sources = [{"name": _html.unescape(s.get("name") or ""), "url": s.get("url")} for s in body.get("sources") or []
+               if s.get("url")][:6]
     return {**data, "sources": sources}
 
 
