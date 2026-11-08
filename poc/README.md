@@ -124,3 +124,16 @@ WCAG criterion. Across all our valid runs the baseline succeeded every time.
 
 Session cleanup: each run requests cancellation and verifies a terminal state before releasing its browser.
 Channel cancellation is also attempted and checked; H may still retain channel slots until its own cleanup.
+
+### Night of 2026-11-07/08 (5 agents in parallel in the app)
+
+- **Sessions stuck at step 0.** From about 00:50 CET, many sessions started a few seconds apart received their
+  first observation and then never got a model step: status `running`, `steps: 0`, for hours. Neither
+  `cancel_session`, `pause_session` nor `force_session_answer` ends them; they hold their slot until stopped from
+  the H web UI. Single sessions started fine at the same time (both `holo4-27b` and `holo4-35b-a3b`). Humble now
+  starts agents one after another (the next waits for the previous one's first step, at most 40 s), detects a
+  session without a first step after 90 s, retries it once on a fresh channel, and lists stuck sessions with their
+  Agent View links in the report so they can be stopped.
+- **Channel slots still leak** (~25–30 min after the run). Humble recycles its own channels: a pending channel can
+  be bound again by a new bridge + session (1 new slot instead of 2). Channels released less than 10 minutes ago
+  worked; 3 of 5 channels idle for ~30 min served 2 commands and went silent, so older ones are not reused.

@@ -1,4 +1,5 @@
 import queue
+from pathlib import Path
 import tempfile
 import threading
 import unittest
@@ -209,3 +210,18 @@ class ChannelPoolTests(unittest.TestCase):
         client.sessions.get_session_quota.return_value = SimpleNamespace(available=1, active=9, limit=10)
         with patch.object(r, "take_recycled_channel", return_value=None), self.assertRaises(RuntimeError):
             r.acquire_channel(client, "t", stop_event=stop)
+
+
+class StartGateTests(unittest.TestCase):
+    def test_gate_is_released_when_the_run_fails_before_its_session(self):
+        import runner
+        gate = threading.Semaphore(1)
+        spec = {"persona": "baseline", "task": {"id": "t", "goal": "Read the heading."}, "site": {"start_url": "http://x.test/"},
+                "run_index": 0, "port": 9499, "out_dir": tempfile.mkdtemp(), "start_gate": gate}
+        with patch.object(runner, "ChromeProcess"), patch.object(runner, "DevToolsController"), \
+                patch.object(runner, "Client") as client, patch.object(runner, "CHANNEL_LOCK", Path(tempfile.mkdtemp()) / "lock"), \
+                patch.dict("os.environ", {"HAI_API_KEY": "fixture-key"}):
+            client.return_value.sessions.get_session_quota.side_effect = RuntimeError("H unreachable")
+            record = runner.run_one(spec)  # fails after taking the gate, before any session
+        self.assertEqual(record["status"], "harness_error")
+        self.assertTrue(gate.acquire(blocking=False))  # not leaked

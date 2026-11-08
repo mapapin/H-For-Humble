@@ -563,9 +563,12 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
         if start_gate is not None:
             # One agent starts at a time and the next waits for its first step: when several sessions were started
             # a few seconds apart, H often never ran their first model step (sessions stuck "running" at step 0).
-            while not start_gate.acquire(timeout=1):
-                if stop_event is not None and stop_event.is_set():
-                    raise RuntimeError("Audit stopped before starting an H session")
+            if not start_gate.acquire(blocking=False):
+                if on_event is not None:
+                    on_event({"waiting": True, "message": "Waiting for its turn to start (agents start one after another)."})
+                while not start_gate.acquire(timeout=1):
+                    if stop_event is not None and stop_event.is_set():
+                        raise RuntimeError("Audit stopped before starting an H session")
             gate_held = True
         lock = open(CHANNEL_LOCK, "w")
         fcntl.flock(lock, fcntl.LOCK_EX)

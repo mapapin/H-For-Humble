@@ -107,14 +107,14 @@ function PerspectiveTile({ audit, persona, onReplay, onWatch }: { audit: Audit; 
     <header><PersonaIcon id={persona} size={16} /><div><h3>{pname(persona)}</h3><small>{persona === 'baseline' ? 'Reference user' : short(persona)}</small></div>
       {running ? <span className="live-pill"><span className="live-dot" />LIVE</span> : score?.grade ? <span className={`grade-badge grade-${score.grade}`} aria-label={`Grade ${score.grade}`}>{score.grade}</span> : null}</header>
     <div className="p-screen">
-      {liveSrc ? <img src={liveSrc} alt={`Live browser of the ${pname(persona)} agent`} /> : still ? <img src={still} alt={`Final screen of the ${pname(persona)} run`} /> : <div className="p-screen-empty">{waiting ? <><Clock3 size={20} /><span>Waiting for a free H slot</span><small>Starts as soon as H releases one</small></> : running ? <><Loader2 className="spin" size={20} /><span>Opening a browser…</span></> : terminal(audit.status) ? <span>Not run</span> : <><Clock3 size={20} /><span>Queued</span></>}</div>}
-      {running && <div className="p-caption"><span className="step-badge">Step {lane![1].step || 0}</span><p>{lane![1].thought || lane![1].message || 'Connecting to H…'}</p></div>}
+      {liveSrc ? <img src={liveSrc} alt={`Live browser of the ${pname(persona)} agent`} /> : still ? <img src={still} alt={`Final screen of the ${pname(persona)} run`} /> : <div className="p-screen-empty">{waiting ? (lane![1].message || '').startsWith('Waiting for its turn') ? <><Clock3 size={20} /><span>Starting soon</span><small>Agents start one after another</small></> : <><Clock3 size={20} /><span>Waiting for a free H slot</span><small>Starts as soon as H releases one</small></> : running ? <><Loader2 className="spin" size={20} /><span>Opening a browser…</span></> : terminal(audit.status) ? <span>Not run</span> : <><Clock3 size={20} /><span>Queued</span></>}</div>}
+      {running && lane![1].session_id && <div className="p-caption"><span className="step-badge">Step {lane![1].step || 0}</span><p>{lane![1].thought || lane![1].message || 'Connecting to H…'}</p></div>}
       {shown && <button className="p-replay" onClick={() => onReplay(shown)} aria-label={`Replay the ${pname(persona)} run`}><Play size={16} />Replay</button>}
       {running && <button className="p-replay" onClick={onWatch} aria-label={`Watch the ${pname(persona)} agent live`}><Radio size={16} />Watch live</button>}
     </div>
     <footer>
       {outcome && <span className={`outcome-chip ${outcome}`}>{outcome === 'pass' ? <CircleCheck size={13} /> : outcome === 'error' ? <AlertOctagon size={13} /> : <CircleX size={13} />}{outcome === 'pass' ? 'Completed' : outcome === 'partial' ? `${score!.completed}/${score!.tested} completed` : outcome === 'error' ? 'Technical error' : 'Blocked'}</span>}
-      {!outcome && <span className="outcome-chip neutral">{running ? 'Exploring' : waiting ? 'Waiting for H' : terminal(audit.status) ? 'Not run' : 'Queued'}</span>}
+      {!outcome && <span className="outcome-chip neutral">{running ? (lane![1].session_id ? 'Exploring' : 'Starting') : waiting ? 'Waiting' : terminal(audit.status) ? 'Not run' : 'Queued'}</span>}
       {score && score.tested > 0 && <dl className="p-metrics">
         <div><dt>Steps</dt><dd>{score.steps ?? '—'}{score.steps_vs_baseline && score.steps_vs_baseline >= 1.15 ? <em>{times(score.steps_vs_baseline)}</em> : null}</dd></div>
         <div><dt>Time</dt><dd>{duration(score.time_s)}</dd></div>
