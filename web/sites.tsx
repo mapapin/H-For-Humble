@@ -1,7 +1,7 @@
 import React, { FormEvent, useEffect, useState } from 'react';
-import { Globe2, LockKeyhole, Pencil, Play, Plus, Trash2, X } from 'lucide-react';
-import { api, date, Dialog, ErrorNote, ScoreRing, Spinner } from './shared';
-import type { Journey, Site, VaultEntry } from './shared';
+import { Globe2, LockKeyhole, Pencil, Play, Plus, Search, Sparkles, Trash2, X } from 'lucide-react';
+import { api, date, Dialog, ErrorNote, host, ScoreRing, Spinner } from './shared';
+import type { Journey, Site, Setup, Suggestion, VaultEntry } from './shared';
 
 /** Vault entries for a website: the ones saved for its origin first, then every other one. */
 export function rankVault(entries: VaultEntry[], url: string) {
@@ -59,6 +59,30 @@ function SiteEditor({ site, vaults, close, saved }: { site?: Site; vaults: Vault
   const [name, setName] = useState(site?.name || ''), [url, setUrl] = useState(site?.url || ''), [vaultId, setVaultId] = useState(site?.vault_id || '');
   const [journeys, setJourneys] = useState<Journey[]>(site?.journeys.length ? site.journeys : [blank()]);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [setup, setSetup] = useState<Setup | null>(null), [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState(''), [suggest, setSuggest] = useState<Suggestion | null>(null);
+  const currentUrl = React.useRef(url);
+  currentUrl.current = url;
+  useEffect(() => { api<Setup>('/settings').then(setSetup).catch(() => {}); }, []);
+  let publicSite = false;
+  try {
+    const parsed = new URL(url), h = parsed.hostname.toLowerCase();
+    publicSite = ['http:', 'https:'].includes(parsed.protocol) && h.includes('.') &&
+      !/^(127\.|10\.|192\.168\.|0\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h) &&
+      !/\.(test|local|localhost|internal)$/.test(h);
+  } catch { /* invalid URL */ }
+  async function suggestJourneys() {
+    const requestedUrl = url;
+    setSuggesting(true); setSuggestError('');
+    try {
+      const result = await api<Suggestion>('/research/journeys', { method: 'POST', body: JSON.stringify({ url: requestedUrl }) });
+      if (currentUrl.current !== requestedUrl) return;
+      setSuggest(result);
+      setJourneys(existing => [...existing.filter(j => j.title.trim() || j.goal.trim()),
+        ...result.journeys.map(j => ({ title: j.title.slice(0, 100), goal: j.goal.slice(0, 2000), expect_answer_contains: '' }))].slice(0, 20));
+    } catch (err) { if (currentUrl.current === requestedUrl) setSuggestError((err as Error).message); }
+    finally { setSuggesting(false); }
+  }
   const update = (i: number, field: keyof Journey, value: string) => setJourneys(js => js.map((j, k) => k === i ? { ...j, [field]: value } : j));
   async function submit(e: FormEvent) {
     e.preventDefault(); setError(''); setBusy(true);
@@ -69,9 +93,12 @@ function SiteEditor({ site, vaults, close, saved }: { site?: Site; vaults: Vault
   return <Dialog close={close} title={site ? 'Edit site' : 'Add a site'}><div className="modal-top"><h2>{site ? 'Edit site' : 'Add a site'}</h2><button className="icon-button" aria-label="Close" onClick={close}><X size={20} /></button></div>
     <form onSubmit={submit}><div className="wizard-content">
       <div className="field-grid"><label>Name<input value={name} onChange={e => setName(e.target.value)} placeholder="Lune" maxLength={100} required autoFocus /></label>
-        <label>URL<input type="url" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://your-product.com" required /></label></div>
+        <label>URL<input type="url" value={url} onChange={e => { setUrl(e.target.value); setSuggest(null); setSuggestError(''); }} placeholder="https://your-product.com" required /></label></div>
       <label>Default credentials<VaultSelect entries={vaults} url={url} value={vaultId} onChange={setVaultId} emptyLabel="None" /></label>
       <h3 className="form-subhead">Journeys</h3>
+      {publicSite && <div className="linkup-suggest"><div><Sparkles size={16} /><span><strong>Not sure what to test?</strong><small>Linkup searches the web for what visitors come to do on {host(url)}.</small></span></div><button type="button" className="button secondary" disabled={busy || suggesting || !setup?.linkup_configured || journeys.length >= 20} onClick={() => void suggestJourneys()}>{suggesting ? <Spinner /> : <Search size={14} />}{suggesting ? 'Searching…' : 'Suggest journeys'}</button></div>}
+      {publicSite && suggest && <div className="linkup-result"><p><b>{suggest.site_name}.</b> {suggest.what_it_is}</p></div>}
+      {publicSite && suggestError && <ErrorNote message={suggestError} />}
       {journeys.map((j, i) => <div className="journey-form" key={j.id || i}><div className="journey-form-heading"><strong>Journey {i + 1}</strong><button type="button" className="icon-button" aria-label={`Remove journey ${i + 1}`} onClick={() => setJourneys(journeys.filter((_, k) => k !== i))}><Trash2 size={15} /></button></div>
         <label>Name<input value={j.title} onChange={e => update(i, 'title', e.target.value)} placeholder="Book a workshop" maxLength={100} required /></label>
         <label>User goal<textarea value={j.goal} onChange={e => update(i, 'goal', e.target.value)} rows={2} minLength={10} maxLength={2000} required placeholder="Book 2 seats for the first December date and report the total at checkout. Do not pay." /></label>

@@ -5,18 +5,11 @@ import type { LucideIcon } from 'lucide-react';
 import './style.css';
 import './report.css';
 import { api, PERSONAS, terminal, pname, host, date, total, Mark, Status, ErrorNote, Spinner, PersonaIcon, Dialog, ScoreRing } from './shared';
-import type { User, Journey, Audit, Site, Setup, Quota, VaultEntry } from './shared';
+import type { Suggestion, User, Journey, Audit, Site, Setup, Quota, VaultEntry } from './shared';
 import { AuditDetail } from './audit-detail';
 import { CredentialVault } from './vault';
 import { SitesPage, VaultSelect } from './sites';
 
-type Suggestion = { site_name: string; what_it_is: string; journeys: { title: string; goal: string; why?: string }[]; accessibility_statement_url?: string; declared_compliance?: string; sources?: { name?: string; url: string }[] };
-
-/** One-click demo: the Lune booking journey (poc/presets/lune.yaml), every perspective. */
-const LUNE_DEMO = { name: 'Lune · book a pottery workshop', url: 'http://127.0.0.1:8770/', config: {
-  personas: PERSONAS.map(p => p.id), repetitions: 1, mode: 'standard', max_rounds: 2,
-  tasks: [{ title: 'Book 2 seats for wheel throwing', goal: 'Book 2 seats for the "Wheel throwing for beginners" workshop on the first available date in December, go to the checkout page and report the total price shown there. Do not pay.', expect_answer_contains: '98.00; 8 Dec|8 December|December 8|8 décembre|08/12' }],
-} } as unknown as Audit;
 
 function Auth({ onLogin }: { onLogin: (user: User) => void }) {
   const [register, setRegister] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -79,9 +72,9 @@ function App() {
           <section className="home-hero"><div className="home-hero-copy"><h1>See your site through <em>five different users.</em></h1><p>H agents run your key journeys in parallel, each in a browser with an impairment applied. You get a score, replays of where they got stuck, and fixes you can re-test.</p></div>
             <form className="home-start" onSubmit={e => { e.preventDefault(); openNew({ url: startUrl, site: sites.find(s => s.url === startUrl) }); }}><label className="sr-only" htmlFor="start-url">Website URL</label><div className="input-icon"><Globe2 size={17} /><input id="start-url" type="url" value={startUrl} onChange={e => setStartUrl(e.target.value)} placeholder="https://your-product.com" required /></div><button className="button primary">Audit this site<ArrowRight size={16} /></button></form>
             <div className="home-personas" aria-hidden="true">{PERSONAS.map(p => <span key={p.id}><PersonaIcon id={p.id} size={14} />{p.name}</span>)}</div>
-            <div className="home-quick">{sites.slice(0, 4).map(s => <button key={s.id} className="site-chip" onClick={() => openNew({ site: s })}><Globe2 size={13} />{s.name}</button>)}<button className="text-button" onClick={() => openNew({ template: LUNE_DEMO })}>Try the Lune demo<ArrowRight size={13} /></button></div></section>
+          </section>
           {!listed && <div className="loading-panel"><Spinner />Loading your audits…</div>}
-          {audits.length > 0 && <section className="section"><div className="section-heading"><h2>Audits</h2><SearchBox value={query} onChange={setQuery} placeholder="Search by name or website…" /></div><AuditTable audits={filtered} onOpen={id => go(`audit/${id}`)} onNew={() => openNew()} searching={!!query} /></section>}
+          {audits.length > 0 && <section className="section"><div className="section-heading"><h2>Audits</h2><SearchBox value={query} onChange={setQuery} placeholder="Search by name or website…" /></div><AuditTable audits={filtered} onOpen={id => go(`audit/${id}`)} onNew={() => openNew()} onDeleted={refresh} searching={!!query} /></section>}
         </>}
         {page === 'sites' && <SitesPage onAudit={site => openNew({ site })} onChange={refresh} />}
         {page === 'vault' && <CredentialVault />}
@@ -96,15 +89,26 @@ function App() {
 function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (s: string) => void; placeholder: string }) { return <div className="search-box"><Search size={17} /><input aria-label="Search audits" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} /></div>; }
 function Empty({ icon: Icon, title, text, action, actionText }: { icon: LucideIcon; title: string; text: string; action?: () => void; actionText?: string }) { return <div className="empty-state"><span className="empty-icon"><Icon size={25} strokeWidth={1.4} /></span><h3>{title}</h3><p>{text}</p>{action && <button className="button secondary" onClick={action}>{actionText}<ArrowRight size={15} /></button>}</div>; }
 
-function AuditTable({ audits, onOpen, onNew, searching = false }: { audits: Audit[]; onOpen: (id: string) => void; onNew: () => void; searching?: boolean }) {
+function AuditTable({ audits, onOpen, onNew, onDeleted, searching = false }: { audits: Audit[]; onOpen: (id: string) => void; onNew: () => void; onDeleted: () => Promise<void>; searching?: boolean }) {
+  const [removing, setRemoving] = useState<Audit | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const closeRemove = React.useCallback(() => { if (!busy) setRemoving(null); }, [busy]);
+  async function remove() {
+    if (!removing || busy) return;
+    setBusy(true); setError('');
+    try { await api(`/audits/${removing.id}`, { method: 'DELETE' }); setRemoving(null); await onDeleted(); }
+    catch (err) { setError((err as Error).message); }
+    finally { setBusy(false); }
+  }
   if (!audits.length) return <Empty icon={searching ? Search : Target} title={searching ? 'No matching audits.' : 'No audit yet.'} text={searching ? 'Try another name or website.' : 'Choose a website and a journey to start.'} action={searching ? undefined : onNew} actionText="Start an audit" />;
-  return <div className="table-wrap"><table className="audit-table"><thead><tr><th>Audit</th><th>Score</th><th>Perspectives</th><th>Status</th><th>Created</th><th><span className="sr-only">Open audit</span></th></tr></thead><tbody>{audits.map(a => {
+  return <><div className="table-wrap"><table className="audit-table"><thead><tr><th>Audit</th><th>Score</th><th>Perspectives</th><th>Status</th><th>Created</th><th><span className="sr-only">Audit actions</span></th></tr></thead><tbody>{audits.map(a => {
     const per = a.scores?.perspectives || {};
     return <tr key={a.id}><td><button className="audit-name" onClick={() => onOpen(a.id)}><span className="site-icon small"><Globe2 size={18} /></span><span><strong>{a.name}</strong><small>{host(a.url)}{a.parent_id ? ' · re-test with fixes' : a.config.mode === 'auto' ? ' · fix until it passes' : ''}</small></span></button></td>
       <td>{a.scores?.score != null ? <span className="table-score"><ScoreRing score={a.scores.score} grade={a.scores.grade} size={38} stroke={4} /><b className={`grade-text grade-${a.scores.grade}`}>{a.scores.grade}</b></span> : <span className="muted-dash">—</span>}</td>
       <td><div className="persona-outcomes-row">{a.config.personas.map(id => { const p = per[id]; const state = !p || p.completion == null ? 'pending' : p.completion === 1 ? 'pass' : p.completion ? 'partial' : 'fail'; return <span key={id} className={`persona-outcome ${state}`} title={`${pname(id)}: ${state === 'pending' ? 'not scored' : state === 'pass' ? 'completed' : state === 'partial' ? 'partly completed' : 'blocked'}`}><PersonaIcon id={id} size={13} /></span>; })}</div></td>
-      <td><Status value={a.status} /></td><td className="table-date">{date(a.created)}</td><td><button className="icon-button" onClick={() => onOpen(a.id)} aria-label={`Open ${a.name}`}><ArrowUpRight size={17} /></button></td></tr>;
-  })}</tbody></table></div>;
+      <td><Status value={a.status} /></td><td className="table-date">{date(a.created)}</td><td><button className="icon-button" onClick={() => onOpen(a.id)} aria-label={`Open ${a.name}`}><ArrowUpRight size={17} /></button><button className="icon-button" disabled={!terminal(a.status)} title={terminal(a.status) ? 'Delete audit' : 'Stop this audit before deleting it'} aria-label={`Delete ${a.name}`} onClick={() => { setError(''); setRemoving(a); }}><Trash2 size={16} /></button></td></tr>;
+  })}</tbody></table></div>
+    {removing && <Dialog close={closeRemove} title="Delete audit"><div className="confirm-dialog"><span className="empty-icon"><Trash2 size={22} /></span><h2>Delete “{removing.name}”?</h2><p>This permanently deletes the report, screenshots and replays. Re-evaluations are kept.</p>{error && <ErrorNote message={error} />}<div className="confirm-actions"><button className="button secondary" disabled={busy} onClick={closeRemove}>Cancel</button><button className="button danger" disabled={busy} onClick={() => void remove()}>{busy ? <Spinner /> : <Trash2 size={15} />}{busy ? 'Deleting…' : 'Delete audit'}</button></div></div></Dialog>}
+  </>;
 }
 
 const blank = (): Journey => ({ title: '', goal: '', expect_answer_contains: '' });

@@ -96,3 +96,5 @@ export function ScoreRing({ score, grade, size = 120, stroke = 10, label }: { sc
     <span className="ring-label" aria-hidden="true"><strong style={{ fontSize: size * 0.3 }}>{score ?? '—'}</strong>{grade && size >= 64 && <small>Grade {grade}</small>}</span>
   </span>;
 }
+
+export type Suggestion = { site_name: string; what_it_is: string; journeys: { title: string; goal: string; why?: string }[]; accessibility_statement_url?: string; declared_compliance?: string; sources?: { name?: string; url: string }[] };

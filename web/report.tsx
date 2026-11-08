@@ -173,17 +173,14 @@ export function EffortChart({ audit }: { audit: Audit }) {
   const per = audit.scores?.perspectives || {};
   const rows = audit.config.personas.map(p => [p, per[p]] as const).filter(([, s]) => s && s.tested > 0);
   if (rows.length < 2) return null;
-  const maxSteps = Math.max(...rows.map(([, s]) => s!.steps || 0), 1), maxTime = Math.max(...rows.map(([, s]) => s!.time_s || 0), 1);
-  const base = per.baseline;
   return <div className="effort-chart" role="table" aria-label="Effort per perspective">
     <div className="effort-row effort-head" role="row"><span role="columnheader">Perspective</span><span role="columnheader">Agent steps</span><span role="columnheader">Time</span><span role="columnheader">Outcome</span></div>
     {rows.map(([p, s]) => <div className="effort-row" role="row" key={p}>
       <span role="cell" className="effort-name"><PersonaIcon id={p} size={12} />{pname(p)}</span>
-      <span role="cell" className="effort-bar-cell"><span className={`effort-bar ${s!.completion ? 'ok' : 'ko'}`} style={{ width: `${100 * (s!.steps || 0) / maxSteps}%` }} />{base?.steps && <span className="baseline-mark" style={{ left: `${100 * base.steps / maxSteps}%` }} title="Baseline" />}<b>{s!.steps ?? '—'}</b>{s!.steps_vs_baseline && s!.steps_vs_baseline >= 1.15 ? <em>{times(s!.steps_vs_baseline)}</em> : null}</span>
-      <span role="cell" className="effort-bar-cell"><span className={`effort-bar time ${s!.completion ? 'ok' : 'ko'}`} style={{ width: `${100 * (s!.time_s || 0) / maxTime}%` }} />{base?.time_s && <span className="baseline-mark" style={{ left: `${100 * base.time_s / maxTime}%` }} />}<b>{duration(s!.time_s)}</b></span>
+      <span role="cell" className="effort-bar-cell"><b>{s!.steps ?? '—'}</b>{s!.steps_vs_baseline && s!.steps_vs_baseline >= 1.15 ? <em>{times(s!.steps_vs_baseline)}</em> : null}</span>
+      <span role="cell" className="effort-bar-cell"><b>{duration(s!.time_s)}</b></span>
       <span role="cell">{s!.completion === 1 ? <span className="outcome-chip pass"><CircleCheck size={12} />Done</span> : s!.completion ? <span className="outcome-chip partial">{Math.round(100 * s!.completion)}%</span> : <span className="outcome-chip fail"><CircleX size={12} />Blocked</span>}</span>
     </div>)}
-    <p className="effort-legend"><span className="baseline-mark static" />Baseline user. Bars in red: the journey was not completed (steps until the agent gave up).</p>
   </div>;
 }
 
