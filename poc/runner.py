@@ -704,7 +704,8 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
         if handle is not None:
             record["session_closed"] = close_h_session(client, handle.id)
             if not record["session_closed"]:
-                record["cleanup_warning"] = "H has not confirmed session closure. Check Agent View before retrying."
+                record["cleanup_warning"] = ("H has not confirmed this session ended. If it stays running in H Agent View, "
+                                             "stop it there: it holds an H slot.")
                 # Do not start another run on a channel still owned by the preceding agent.
                 record["status"] = "harness_error"
                 if on_event is not None:

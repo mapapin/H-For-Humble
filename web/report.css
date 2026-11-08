@@ -277,3 +277,8 @@
   .static-list li { grid-template-columns: 1fr; }
   .barrier { grid-template-columns: 1fr; }
 }
+.stuck-note { display: flex; gap: 12px; padding: 14px 18px; margin-bottom: 16px; border-radius: 12px; background: #fdf3e7; border: 1px solid #f0d9b8; color: #5c4422; }
+.stuck-note > svg { color: var(--fair); flex-shrink: 0; margin-top: 2px; }
+.stuck-note strong { font-size: 13.5px; } .stuck-note p { font-size: 12.5px; line-height: 1.5; margin-top: 3px; }
+.stuck-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.stuck-links .button { min-height: 32px; padding: 6px 10px; }

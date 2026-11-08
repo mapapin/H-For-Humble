@@ -161,9 +161,9 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
                             record.get("session_closed") is not False or record.get("stalled")):
                         # One retry on a fresh browser channel: stalls, setup errors and a recycled channel that stopped
                         # delivering commands are transient. (A session stuck on a dead channel ends at its time limit.)
-                        emit("progress", lane=idx, message=f"{persona.replace('_', ' ').capitalize()}: "
-                             + ("the recycled browser channel did not respond" if dead_recycled else "technical error")
-                             + ", retrying once with a fresh browser channel.")
+                        emit("progress", lane=idx, message=("The recycled browser channel did not respond"
+                             if dead_recycled else "H did not start this session (no first step)" if record.get("stalled")
+                             else "Technical error") + ", retrying once with a fresh browser channel.")
                         previous = record.get("session_id")
                         record = run_one({**spec, "retry": 1, "no_recycle": True}, lane=lane, on_event=on_event,
                                          stop_event=halt)

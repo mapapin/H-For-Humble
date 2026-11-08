@@ -1,192 +1,132 @@
 # Humble
 
-**A different perspective on your product.** Humble is a local web application for synthetic usability and
-accessibility testing. Give it a website, a test account and a user journey. H computer-use agents attempt
-that journey in real Chrome browsers with different visual and motor constraints, then compare outcomes.
+**See your site through five different users.** Humble sends H computer-use agents to run your key user journeys
+*in parallel*, each in a real Chrome with an impairment applied to the browser itself: low vision (200% zoom +
+blur), colour blindness (deuteranopia), a hand tremor (every click lands up to 10 px off) and keyboard only
+(the mouse is refused). A baseline agent runs the same journey as the reference. You get an inclusion score,
+a step-by-step replay of where each user got stuck, the barriers they reported, what a static checker would
+(and would not) have told you, and fixes you can preview "through their eyes" and re-test with the same agents.
 
-Built by **H For Humble — Théophile + Mattéo**, for the H Company × 42AI Computer Use Agents Hackathon.
+Built by **H For Humble (Théophile + Mattéo)** for the H Company × 42AI Computer Use Agents Hackathon, Paris,
+November 2026.
 
-## What works
+> Why now: one adult in four in the EU lives with a disability, and since June 2025 the **European Accessibility
+> Act** requires e-commerce, banking and transport services to be accessible. Static checkers list rule
+> violations; they cannot tell a team whether a person with low vision, a tremor or no mouse can actually finish
+> a purchase. Humble answers exactly that, with agents that operate the real UI.
 
-- Personal accounts with private project and audit history, stored in SQLite.
-- Three-step audit setup: website and access, user journeys, personas and repetitions.
-- A separate personal credential vault: encrypted logins/headers, website binding and reusable audit links.
-- Five perspectives: baseline, low vision (200% zoom + blur), deuteranopia, hand tremor (±10px), keyboard only.
-- Real H sessions driving Chrome on the local machine. No installation on the audited website.
-- Live browser snapshots, action count, activity feed and H Agent View links.
-- Pause/resume the run queue; stop requests cancellation of the active H session and skips remaining runs.
-- Statistics first: passed/failed counts, reported barriers, navigation steps and agent time.
-- Click any perspective to inspect its individual journeys and repetitions, with the matching live/final preview.
-- One audit at a time, one perspective at a time, to respect the H concurrency quota.
-- **Suggested fixes** after each audit: one fix per barrier (WCAG criterion, page, preview CSS/JS and the real
-  code change), with **before/after sliders** rendered as each perspective sees the page. **Evaluate again with
-  fixes** re-runs every perspective with the fixes injected and compares scores (manual, it takes a full audit).
-- **Fix until it passes** (auto mode): audit → fix → re-audit, until every perspective passes or the round limit.
+## What it does
 
-The English interface uses an ivory and indigo theme, responsive layouts and keyboard navigation.
+| | |
+|---|---|
+| **5 agents in parallel** | One H agent and one dedicated Chrome per perspective, side by side. While they run, a live grid shows each browser and the agent's current thought ("Focus is on the + button, pressing Enter…"). Pause, resume and stop at any time. |
+| **Impairments enforced, not role-played** | Chrome DevTools emulates blur and deuteranopia and zooms the page to 200% (media queries react); our subclass of H's browser bridge jitters every pointer action for tremor and refuses mouse commands for keyboard-only. |
+| **A score, not just pass/fail** | Each run scores 0 if the user could not finish; a finished journey loses points for extra steps and time compared with the baseline user, retried or blocked actions, and reported barriers. Perspectives and audits are averaged and graded A–F. |
+| **Replays** | Every run is rebuilt from H's session history: the screenshot the agent decided on, its thought, its action, the click target and where a tremor click actually landed, blocked mouse actions, key presses. Plays like a video. |
+| **Static checker vs real journeys** | axe-core runs on every page the agents visited. On our demo shop it flags 1 rule; the agents find 3 perspectives that cannot check out, 2 of which no rule detects. |
+| **Linkup research** | Suggests the journeys visitors come for on any public site, and reads the site's own accessibility statement (e.g. mousquetaires.com: *partially compliant with RGAA 4.1.2, 69% of criteria met, self-assessed*, with its known keyboard issues) to show **declared vs measured**. |
+| **Fixes, before/after, re-test** | One fix per barrier (WCAG criterion, preview CSS/JS, the real code change). A large before/after slider renders the page as the blocked user sees it. **Evaluate again with fixes** re-runs every agent with the fixes injected; **Fix until it passes** loops audit → fix → audit automatically. Fixes come from Devin (API) when configured, hand-written fixes for the demo sites, or Humble's rule engine for any site. |
+| **Shareable report** | One self-contained HTML file per audit (screenshots, replays, before/after embedded) that opens anywhere, offline. |
 
-## Setup
+## Quick start
 
-Requires Node.js 20.19+ (or 22.12+), Python 3.10+, Google Chrome, and an H Agents API key.
+Requires Python 3.10+, Node.js 20.19+ (or 22.12+), Google Chrome (or Chrome for Testing) and an H Agents API key.
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 npm install
-cp .env.example .env
+cp .env.example .env          # then set HAI_API_KEY=hk-... (and optionally LINKUP_API_KEY, DEVIN_API_KEY + DEVIN_ORG_ID)
+npm run build
+npm start                     # http://127.0.0.1:8000
 ```
 
-Set `HAI_API_KEY=hk-...` in `.env`. Keep the `HAI_API_KEY=` prefix; a bare key is not loaded.
-Never commit `.env`. The key stays on the server.
+Chrome is detected automatically (Chrome for Testing cache, macOS/Linux system paths); otherwise set
+`AUDIT_CHROME=/path/to/chrome` in `.env`. Never commit `.env`.
 
-Chrome is detected at the existing POC Linux path, the standard macOS Google Chrome path, or Linux system paths.
-For a different installation, set `AUDIT_CHROME=/absolute/path/to/chrome` in `.env`.
-Selenium Manager downloads the matching ChromeDriver on first use; allow network access for that setup.
-If an old driver is on your PATH, set `SE_SKIP_DRIVER_IN_PATH=true` in `.env`.
-
-## Run locally
+Two deliberately inaccessible demo sites are included:
 
 ```bash
-npm run build
-npm start
+.venv/bin/python poc/demo_startup/server.py --port 8770   # Lune: pottery workshops in Paris (designed startup site)
+.venv/bin/python poc/demo_site/server.py --port 8765      # Mugs & Co: minimal shop with a login
 ```
-
-Open **http://127.0.0.1:8000** and create an account. Use a new password for this local application.
-Do not run multiple API workers: the local audit coordinator is intentionally a single process.
-
-For frontend development, run `npm start` and `npm run dev` in separate terminals, then open
-http://127.0.0.1:5173. Vite proxies API requests to port 8000. Rebuild and restart the API after changing
-the production frontend or server code.
 
 ## How judges can test it live
 
-1. Complete setup, build and start the application as above.
-2. In another terminal, start the deliberately inaccessible demo shop:
-   ```bash
-   .venv/bin/python poc/demo_site/server.py --port 8765
-   ```
-   Leave `DEMO_TOKEN` unset for this walkthrough. If the shop was started with a token, include its
-   `X-Audit-Token` under advanced access headers.
-3. Create a Humble account, click **New audit**, and enter:
-   - Audit name: `Checkout from every perspective`
-   - Website: `http://127.0.0.1:8765/`
-   - Enable website login. Use the **demo-only** account `alex@demo-shop.test` / `mug-lover-2026`.
-4. Add a journey named `Buy an in-stock blue mug` with this goal:
-   > Sign in, add one Blue Mug that is currently in stock to your cart, go to the checkout page,
-   > and report the order total shown there. Stop before placing an order.
-   Set the expected answer to `19.90`.
-5. Keep **Baseline** and **Keyboard only** selected, deselect the others, and use one repetition.
-   This makes two **sequential** runs, sharing one browser channel.
-6. Launch the audit. Watch browser snapshots, open H Agent View, and inspect the activity tab.
-7. When it finishes, compare success and effort, open **Evidence**, inspect screenshots and export JSON.
-   The demo checkout button cannot be reached by keyboard, so this persona should reveal a barrier.
-8. Return to **Audit history**; the report remains available after signing out and back in.
-   A different account has its own empty history.
+1. Do the quick start, start Lune (`poc/demo_startup/server.py --port 8770`) and open http://127.0.0.1:8000.
+   Create a local account.
+2. Type `http://127.0.0.1:8770/` in **Audit this site**. Journey: *Book 2 seats for the "Wheel throwing for
+   beginners" workshop on the first available date in December, go to the checkout page and report the total
+   price shown there. Do not pay.* Expected answer: `98.00`. Keep the five perspectives. Launch.
+3. Watch the five agents work side by side (click a live tile to watch one full size, or open it in H Agent View).
+   An audit takes 2 to 6 minutes.
+4. Read the verdict, open the replays (keyboard-only gives up on the date picker; low vision cannot reach the
+   booking card at 200% zoom; colour blind books a sold-out date), then the **Fixes** tab: drag the slider, and
+   click **Evaluate again with fixes**.
+5. Try a real site: **Audit this site** with `https://www.mousquetaires.com/` and **Suggest journeys** (Linkup).
+6. No time to run it? Open the sample reports in [`docs/`](docs/) in a browser: they are real audits exported
+   from Humble.
 
-For broader exploration, select all five personas. Each run allows 35 steps and up to 6 minutes,
-plus browser startup and H scheduling overhead. Use more repetitions to assess variability.
+Each perspective uses 2 H concurrency slots (its browser channel and its agent), so 10 free slots run all five at
+once; with fewer, the remaining agents wait for a slot and start automatically.
 
-## Fix workflows
+## How it works
 
-Each run saves the rendered HTML of every page the perspective saw. When an audit finishes with failures, a
-fixer turns the barriers and those pages into a patch: one fix per barrier, with a **preview** (CSS and/or JS
-injected into the page by our Chrome, never into the real site) and the **code change** a developer should make.
+```text
+React/TS/Vite UI ── same-origin API + Server-Sent Events ──► FastAPI + SQLite (accounts, audits, events, vault)
+                                                                 │ spawned worker per audit
+                                                                 ▼
+                         one lane per perspective, in parallel (threads), each lane:
+   ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+   │ Chrome (own profile, own port) ◄── DevTools: zoom, blur/deuteranopia, headers, fix previews,  │
+   │                                     page snapshots, live screenshots                          │
+   │ PersonaBridge (subclass of H's local browser bridge): tremor jitter, keyboard-only filter,    │
+   │                                     zoom coordinate scaling, action log                       │
+   │ H agent session (Agents API, host: user_device): structured RunReport answer, custom tool     │
+   │                                     for logins (the model never sees secrets)                 │
+   └───────────────────────────────────────────────────────────────────────────────────────────────┘
+        after each run: replay from H's session history · scores · axe-core scan · Linkup context
+        after the audit: fixes (Devin / hand-written / rule engine) → before/after renders → re-test
+```
 
-- **Fixer**: Devin (API v3, structured output) when `DEVIN_API_KEY` and `DEVIN_ORG_ID` are set in `.env`;
-  otherwise hand-written fixes for the demo shop in the same format (`poc/fixes/demo_shop.json`), only for
-  perspectives that failed and only on that site.
-- **Before/after**: the saved page is re-rendered as the persona sees it, without and with the fix, cropped
-  around what changed. Keyboard-only and tremor views add an overlay (Tab order and unreachable controls;
-  targets under 24x24px), since those barriers are invisible in a plain screenshot.
-- **Evaluate again with fixes** creates a linked audit with the patch injected in every page and shows
-  before → after scores. Manual credentials are never stored, so they are asked again.
-- **Fix until it passes** runs rounds in one audit; the Fixes tab shows the score per round and the final fixes.
+Code map: `poc/runner.py` (one run: Chrome + bridge + H session, watchdog, channel pool), `poc/personas.py`,
+`poc/chrome.py`, `poc/replay.py`, `poc/scoring.py`, `poc/research.py` (Linkup), `poc/static_scan.py` (axe-core),
+`poc/fixes.py` + `poc/autofix.py` (fixers), `poc/render.py` (before/after), `poc/export_report.py`,
+`app/jobs.py` (parallel lanes, rounds), `app/main.py` (API), `web/` (UI). The original command-line pipeline still
+works: `poc/audit.py`, `poc/pipeline.py`.
 
-The same pipeline runs from the command line: `.venv/bin/python poc/pipeline.py --help`.
+## Reliability
 
-## H session quota and stopping
+Tested end to end with real H sessions (5 agents in parallel on Lune, Mugs & Co and mousquetaires.com).
 
-The tested free-plan quota is **3 concurrent slots**. A self-hosted browser channel consumes one,
-and its agent consumes another. Humble runs **one lane**, keeping the channel for subsequent personas.
-It checks quota before opening a channel. Other audits on this local server are rejected while one is active.
+- **Watchdogs**: a session with no first step after 90 s, or no new step for 3 minutes, is stopped and retried
+  once on a fresh browser channel. Two failing cases stop the audit so it never burns more H slots.
+- **H slots**: H keeps a finished browser channel (and its slot) for ~25–30 minutes. Humble checks the quota before
+  each run, waits (visibly) for free slots, and recycles its own channels released in the last 10 minutes, so a
+  re-evaluation right after an audit can start immediately.
+- **Isolation**: one Chrome profile and port per lane; a crash in one lane does not stop the others; every cleanup
+  step runs on its own; nothing the agent types is a secret (logins go through a custom tool).
+- **Tests**: `npm test` (API, worker, scoring, research, fixes: no H calls) and `scripts/browser_smoke.py`
+  (UI flows, mobile layout and axe-core WCAG checks of Humble's own interface).
 
-**Pause queue** allows the current run to finish and prevents the next one from starting. **Stop** requests
-cancellation through the H SDK; the bridge continues serving while the session finishes. Stopping can take
-time, and partial results are retained. If the server is restarted during an audit, the history records an
-interrupted audit as a technical error; check its H Agent View before retrying.
+## Partner integrations
 
-H browser channels can remain pending until H's periodic cleanup after the audit. A successful agent
-cancellation does not guarantee that the channel slot is released immediately. If the quota is occupied,
-wait for H cleanup rather than repeatedly launching new audits. See [POC notes](poc/README.md) for details.
+- **H Company** (core): Agents API sessions on our own Chrome (`host: user_device`), structured output, custom
+  tools, live changes feed, session history for replays, Agent View links.
+- **Linkup**: journey suggestions (`/v1/search`, structured output) and the declared accessibility of the site
+  (`/v1/fetch` of its accessibility statement).
+- **Devin**: `DevinFixer` (API v3, structured output) writes the fixes when `DEVIN_API_KEY`/`DEVIN_ORG_ID` are set;
+  otherwise hand-written demo fixes and the rule engine are used.
+- **axe-core** (open source) for the static comparison.
 
 ## Privacy and interpretation
 
-Passwords for Humble accounts are salted and hashed with scrypt. Login sessions use random, HttpOnly,
-SameSite cookies; only token hashes are stored. The API checks ownership for reports, events, controls,
-exports and images. Run the app on loopback; this hackathon setup is intended for local use.
+Humble accounts use scrypt-hashed passwords and HttpOnly SameSite session cookies; the API checks ownership for
+every report, image, control and export. Run it on loopback. One-time website credentials stay in process memory;
+credentials saved in the **Credential vault** are Fernet-encrypted in SQLite (`data/vault.key`, or
+`HUMBLE_VAULT_KEY`). Logins are typed by our code through a custom tool, so the H model never receives secret
+values; headers are added by the browser. Screenshots and reports can contain site content: use test accounts.
 
-One-time website credentials travel to the local backend and spawned worker in memory. They are not stored
-in project configuration or reports. Credentials explicitly saved in **Credential vault** are encrypted with
-Fernet authenticated encryption in SQLite. Only metadata (name, origin and credential types) is returned to
-the interface. A custom tool types credentials into the browser; the H model
-does not receive their values as prompt text. Headers are injected by the browser. Site content, usernames
-shown on pages, screenshots and reports can still contain sensitive information: use test accounts.
-
-Data lives in ignored `data/`: SQLite plus audit screenshots and run records. The vault encryption key is
-generated as `data/vault.key` with owner-only permissions; preserve this key alongside database backups.
-You can instead provide a Fernet key through `HUMBLE_VAULT_KEY` before the vault's first use. Existing vault
-entries require the same key to be unlocked.
-
-To reuse a login, open **Credential vault → Add credentials**, enter its website URL and test login, then
-choose **Use credential vault** in the audit setup. The selected entry must match the website's exact origin
-(protocol, hostname and port). **Run again** retains the link. Entries can be replaced or deleted; old reports
-keep only the entry ID/name and never its password. One-time manual access remains available.
-
-H processes the agent session in its cloud; the app and Chrome are local.
-
-These are **simulated user journeys, not accessibility certification or human user research**. Rates are
-observed outcomes for the selected sample. Technical harness errors are excluded from success rates and
-shown separately. A failed baseline makes comparisons harder to interpret.
-
-## Architecture
-
-```text
-React / TypeScript / Vite
-        │ same-origin API + SSE
-FastAPI ├── SQLite: users, sessions, projects, audits, events
-        └── spawned worker (one audit at a time)
-                └── runner.Lane → runner.run_one()
-                        ├── dedicated Chrome + DevTools persona emulation
-                        ├── PersonaBridge: input constraints + action log
-                        └── H Agents SDK: session, structured answer, cancellation
-```
-
-The original CLI remains available: `.venv/bin/python poc/audit.py --help`.
-
-## Validation
-
-```bash
-npm test           # isolated API tests; no H calls or credits
-npm run build      # TypeScript and production bundle
-.venv/bin/python scripts/browser_smoke.py
-```
-
-The browser smoke test requires the local app to be running. It creates an isolated review account,
-checks desktop/mobile UI, vault creation/reuse, multi-journey case selection, report tabs, search, export and sign-out, and saves screenshots under
-ignored `data/qa/`. It seeds a clearly labelled **UI test fixture** report only in that review account and
-runs axe WCAG checks. It creates no H run.
-
-Optional paid integration test, with both app and demo shop running:
-
-```bash
-.venv/bin/python scripts/live_smoke.py
-```
-
-This creates one real audit with two sequential personas using the configured H API key.
-
-## Hackathon partner integrations
-
-H computer use is implemented in the product. Devin-generated fixes are wired in (`poc/fixes.py`,
-`DevinFixer`) and used when a Devin API key is configured; until then the demo stand-in fixes are used.
-Linkup journey suggestions are planned, not wired in yet. Before submission, integrate one required partner or document
-the team's actual Devin development session/PR; using Codex alone does not satisfy that partner rule.
+These are **simulated user journeys, not an accessibility certification or user research**. Agents are not people;
+they show where real people are likely to struggle and give a repeatable, comparable measure. Technical harness
+errors are excluded from scores and shown separately.

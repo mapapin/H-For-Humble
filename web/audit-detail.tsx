@@ -3,7 +3,7 @@ import { ArrowDownToLine, ArrowLeft, ArrowUpRight, Clock3, LockKeyhole, Pause, P
 import { api, date, Dialog, ErrorNote, host, pname, Spinner, Status, terminal, total } from './shared';
 import type { Audit, Run } from './shared';
 import { FixesPanel } from './fixes';
-import { BarrierList, ContextCard, EffortChart, PerspectiveGrid, ScoreHero, StaticCard } from './report';
+import { BarrierList, ContextCard, EffortChart, PerspectiveGrid, ScoreHero, StaticCard, StuckSessions } from './report';
 import { ReplayDialog } from './replay';
 
 const TABS = ['report', 'fixes', 'activity'] as const;
@@ -61,6 +61,7 @@ export function AuditDetail({ id, onBack, onRerun, onUpdate, onOpen = next => { 
     {!connected && isActive && <div className="soft-note"><Clock3 size={16} />Reconnecting to the live feed. Your audit continues on the server.</div>}
     {isActive && <div className="live-strip"><span className="live-dot" /><strong>{audit.status === 'paused' ? 'Paused: running agents finish, no new run starts' : audit.status === 'stopping' ? 'Stopping: asking H to end every session' : lanes ? `${lanes} agent${lanes > 1 ? 's' : ''} exploring in parallel${waitingLanes ? `, ${waitingLanes} waiting for a free H slot` : ''}${roundLabel}` : waitingLanes ? `Waiting for free H slots${roundLabel}` : `Preparing browsers${roundLabel}`}</strong><span>{audit.progress.completed || 0} of {total(audit)} runs finished · each agent drives its own Chrome with its impairment applied</span></div>}
 
+    <StuckSessions audit={audit} />
     <ScoreHero audit={audit} />
     <ContextCard audit={audit} />
 

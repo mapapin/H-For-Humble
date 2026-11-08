@@ -193,3 +193,14 @@ export function StaticCard({ audit }: { audit: Audit }) {
     <p className="static-note">Static rules check the code; Humble's agents live the journey. Use both: the agents tell you which findings actually stop people, and what no rule can see.</p>
   </section>;
 }
+
+/** H sessions that did not end cleanly keep holding concurrency slots on H: say which, and where to stop them. */
+export function StuckSessions({ audit }: { audit: Audit }) {
+  const stuck = (audit.results || []).filter(r => r.session_closed === false && r.agent_view_url);
+  if (!stuck.length || !terminal(audit.status)) return null;
+  return <div className="stuck-note" role="status"><AlertOctagon size={18} /><div>
+    <strong>{stuck.length} H session{stuck.length > 1 ? 's' : ''} did not end cleanly</strong>
+    <p>H never started {stuck.length > 1 ? 'them' : 'it'} or never confirmed the end, so {stuck.length > 1 ? 'they keep' : 'it keeps'} holding H concurrency slots. Stop {stuck.length > 1 ? 'each one' : 'it'} in H Agent View to free the slots for the next audit.</p>
+    <div className="stuck-links">{stuck.map(r => <a key={r.tag} className="button secondary" href={r.agent_view_url} target="_blank" rel="noreferrer">{pname(r.persona)}<ArrowUpRight size={13} /></a>)}</div>
+  </div></div>;
+}
