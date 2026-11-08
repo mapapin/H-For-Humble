@@ -19,7 +19,7 @@ November 2026.
 
 | | |
 |---|---|
-| **5 agents in parallel** | One H agent and one dedicated Chrome per perspective, side by side. While they run, a live grid shows each browser and the agent's current thought ("Focus is on the + button, pressing Enter…"). Pause, resume and stop at any time. |
+| **5 agents in parallel** | One H agent and one dedicated Chrome per perspective, side by side. While they run, a live grid shows each browser and the agent's current thought ("Focus is on the + button, pressing Enter…"). Pause, resume and stop at any time, or steer one agent with a hint (the run is then marked as assisted). |
 | **Impairments enforced, not role-played** | Chrome DevTools emulates blur and deuteranopia and zooms the page to 200% (media queries react); our subclass of H's browser bridge jitters every pointer action for tremor and refuses mouse commands for keyboard-only. |
 | **A score, not just pass/fail** | Each run scores 0 if the user could not finish; a finished journey loses points for extra steps and time compared with the baseline user, retried or blocked actions, and reported barriers. Perspectives and audits are averaged and graded A–F. |
 | **Replays** | Every run is rebuilt from H's session history: the screenshot the agent decided on, its thought, its action, the click target and where a tremor click actually landed, blocked mouse actions, key presses. Plays like a video. |

@@ -8,7 +8,8 @@ To try it: `git checkout humble-v2 && npm install && npm run build && npm start`
 
 **Product**
 - **5 agents in parallel in the app**, one H agent + one Chrome per perspective, with live screens and the agent's
-  current thought on each tile, a full-size live view, pause/resume/stop.
+  current thought on each tile, a full-size live view, pause/resume/stop, and **steer** (send one agent a hint;
+  the run is marked as assisted).
 - **New report**: inclusion score (0–100, A–F) with a one-sentence verdict; per-perspective tiles (outcome, steps
   ×baseline, time, barriers, score); "what stopped users" (worst first, each with a replay); effort chart vs baseline.
 - **Replays** of every run, rebuilt from H's session history: screenshot per step, the agent's thought, its action,
