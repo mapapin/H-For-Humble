@@ -42,7 +42,10 @@ To try it: `git checkout humble-v2 && npm install && npm run build && npm start`
 
 1. **Sessions stuck at step 0** from ~00:50: several sessions started seconds apart got their first observation,
    then never a model step. `cancel`, `pause` and `force_answer` don't end them; they hold slots until stopped in the
-   web UI. You stopped 5 at ~04:20; more got stuck at 04:22 (session ids in the app's report banner).
+   web UI. You stopped 5 at ~04:20; more got stuck at 04:22 and were released around 04:50. Taking over the
+   stuck session's browser channel with a new session (H's docs say it cancels the earlier one) did not end it.
+   Since agents start one after another (05:00), about 1 start in 5 still stalls; Humble retries it on a fresh
+   browser and the audit completes.
 2. **Browser channel slots still leak** for ~25–30 min after each run (the global fix wasn't live overnight).
 
 Workarounds are in place (see Reliability), but a fully parallel live demo depends on (1) being fixed. Plan B:
@@ -55,7 +58,8 @@ show finished audits and replays (the report is fully usable offline).
 | Mugs & Co, 5 agents in parallel (00:16) | 5/5 runs done in ~5 min. Score **39/F**: baseline and tremor complete; colour blind buys the backorder mug, keyboard-only can't reach checkout, low vision can't find checkout at 200% (29 steps). axe-core flags **1** rule (contrast). Sample: `docs/sample-report-demo-shop.html`, montage `docs/montage-demo-shop.mp4`. |
 | Mugs & Co re-evaluation with fixes (yesterday) | **40 → 100**: every perspective completes with the fixes injected. |
 | Mugs & Co "Fix until it passes" (yesterday) | **33 → 100** in 2 rounds. |
-| mousquetaires.com (real site, 00:30) | Score **79/B** on 4 perspectives (keyboard-only didn't get a slot): all complete, but **low vision needed 4.7× the steps** (33 vs 7, score 36). Linkup: *partially compliant with RGAA 4.1.2 (69%), self-assessed*, known issues include keyboard traps in the mega-menu. axe: 5 rules. Sample: `docs/sample-report-mousquetaires.html`. |
+| **mousquetaires.com, full audit (05:21)** | **58/D**: baseline, colour blind, tremor find the figure (10–12 steps); **keyboard-only blocked by the hover-only brand menu** (the site's own statement lists keyboard issues in its mega-menu); low vision blocked at 200%. Linkup: *Partially compliant with RGAA 4.1.2 (69%)*, self-assessed, 6 known issues. axe: 6 rules. Rule-engine fixes with before/after. Sample: `docs/sample-report-mousquetaires.html`. |
+| mousquetaires.com (first try, 00:30) | Score **79/B** on 4 perspectives (keyboard-only didn't get a slot): all complete, but **low vision needed 4.7× the steps** (33 vs 7, score 36). Linkup: *partially compliant with RGAA 4.1.2 (69%), self-assessed*, known issues include keyboard traps in the mega-menu. axe: 5 rules. Sample: `docs/sample-report-mousquetaires.html`. |
 | **Lune, final audit (05:14)** | **49/D**: baseline 100 (6 steps), tremor 100, colour blind 46 (completed in 15 steps after booking a sold-out date and hitting the waitlist), low vision 0, keyboard-only 0. 4 fixes, 7 before/after images. Sample: `docs/sample-report-lune.html`, montage `docs/montage-lune.mp4`. |
 | **Lune re-evaluation with fixes (05:19)** | **49 → 85/B, every perspective completes**: baseline 6 steps, colour blind 6, tremor 6, low vision 12, keyboard-only 20. **This is the demo story.** |
 | Lune, complete 5-agent audit (04:54) | **34/F**: baseline 92 and tremor 80 complete; low vision, colour blind and keyboard-only blocked. One session never started on H (tremor) and was retried automatically on a fresh browser, then completed. axe: 4 rules. 4 fixes with before/after. Baseline needed 28 steps on the 18 px date strip, so I replaced it with a month calendar (26 px days) for the next runs. |
