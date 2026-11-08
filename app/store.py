@@ -63,12 +63,20 @@ def init():
         columns = {row["name"] for row in db.execute("PRAGMA table_info(audits)")}
         for name, ddl in (("fixes", "TEXT NOT NULL DEFAULT '{}'"), ("rounds", "TEXT NOT NULL DEFAULT '[]'"),
                           ("parent_id", "TEXT"), ("scores", "TEXT NOT NULL DEFAULT '{}'"),
-                          ("context", "TEXT NOT NULL DEFAULT '{}'"), ("static_scan", "TEXT NOT NULL DEFAULT '{}'")):
+                          ("context", "TEXT NOT NULL DEFAULT '{}'"), ("static_scan", "TEXT NOT NULL DEFAULT '{}'"),
+                          ("insight", "TEXT NOT NULL DEFAULT '{}'")):
             if name not in columns:
                 db.execute(f"ALTER TABLE audits ADD COLUMN {name} {ddl}")
+        # Saved sites: a project the user keeps, with its journey presets and default credentials.
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(projects)")}
+        for name, ddl in (("saved", "INTEGER NOT NULL DEFAULT 0"), ("journeys", "TEXT NOT NULL DEFAULT '[]'"),
+                          ("vault_id", "TEXT"), ("updated", "REAL")):
+            if name not in columns:
+                db.execute(f"ALTER TABLE projects ADD COLUMN {name} {ddl}")
 
 
-JSON_FIELDS = ("results", "summary", "progress", "fixes", "rounds", "scores", "context", "static_scan")
+JSON_FIELDS = ("results", "summary", "progress", "fixes", "rounds", "scores", "context", "static_scan", "insight",
+               "journeys")
 
 
 def event(audit_id, kind, message):
@@ -78,7 +86,8 @@ def event(audit_id, kind, message):
 
 
 def update(audit_id, **fields):
-    allowed = {"status", "results", "summary", "progress", "error", "finished", "fixes", "rounds", "scores", "context", "static_scan"}
+    allowed = {"status", "results", "summary", "progress", "error", "finished", "fixes", "rounds", "scores", "context",
+               "static_scan", "insight"}
     assert fields and set(fields) <= allowed
     values = [json.dumps(v) if k in JSON_FIELDS else v for k, v in fields.items()]
     with connect() as db:

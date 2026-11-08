@@ -22,6 +22,8 @@ November 2026.
 | **5 agents in parallel** | One H agent and one dedicated Chrome per perspective, side by side. While they run, a live grid shows each browser and the agent's current thought ("Focus is on the + button, pressing Enter…"). Pause, resume and stop at any time, or steer one agent with a hint (the run is then marked as assisted). |
 | **Impairments enforced, not role-played** | Chrome DevTools emulates blur and deuteranopia and zooms the page to 200% (media queries react); our subclass of H's browser bridge jitters every pointer action for tremor and refuses mouse commands for keyboard-only. |
 | **A score, not just pass/fail** | Each run scores 0 if the user could not finish; a finished journey loses points for extra steps and time compared with the baseline user, retried or blocked actions, and reported barriers. Perspectives and audits are averaged and graded A–F. |
+| **Judged by Holo, not by string matching** | Whether a journey was really completed is decided by a Holo model (H Models API) that reads the agent's final answer, its last steps and stats against the expected facts: any format is accepted ("98 €" for "98.00", "Tuesday 8th of December" for "8 Dec"), wrong values are not ("18 Dec", "€196", "I picked 9 December instead"). On 108 past runs it agreed with the old exact-match rule 103 times; the 5 disagreements were all formats the rule missed. The report headline is also written by Holo from the scorecard and the barriers the agents reported, and rejected if it contains a number that is not in the results. The rule is kept as the fallback. |
+| **Saved sites and journey presets** | Save the sites you test often with their journeys and default credentials; launch an audit from a saved site in two clicks and tick the journeys to run. Vault credentials stay linked to their website (ranked first there) but can be used on any site. |
 | **Replays** | Every run is rebuilt from H's session history: the screenshot the agent decided on, its thought, its action, the click target and where a tremor click actually landed, blocked mouse actions, key presses. Plays like a video. |
 | **Static checker vs real journeys** | axe-core runs on every page the agents visited. On our demo shop it flags 1 rule; the agents find 3 perspectives that cannot check out, 2 of which no rule detects. |
 | **Linkup research** | Suggests the journeys visitors come for on any public site, and reads the site's own accessibility statement (e.g. mousquetaires.com: *partially compliant with RGAA 4.1.2, 69% of criteria met, self-assessed*, with its known keyboard issues) to show **declared vs measured**. |
@@ -56,10 +58,10 @@ Two deliberately inaccessible demo sites are included:
 
 1. Do the quick start, start Lune (`poc/demo_startup/server.py --port 8770`) and open http://127.0.0.1:8000.
    Create a local account.
-2. Click **Try it on Lune, our demo startup** under the home URL field: the journey is filled in (*book 2 seats
+2. Click **Try the Lune demo** under the home URL field: the journey is filled in (*book 2 seats
    for "Wheel throwing for beginners" on the first available date in December and report the total*; expected
-   answer `98.00; 8 Dec|8 December|December 8`, the total *and* the first open date). Keep the five perspectives.
-   Launch.
+   answer: the total *and* the first open date, judged by Holo whatever the format). Keep the five perspectives.
+   Launch. Tick **Save … to Sites** on the journeys step to find Lune and its journey under **Sites** next time.
 3. Watch the five agents work side by side (click a live tile to watch one full size, or open it in H Agent View).
    An audit takes 2 to 6 minutes.
 4. Read the verdict, open the replays (keyboard-only gives up on the date picker; low vision cannot reach the
@@ -91,12 +93,12 @@ React/TS/Vite UI ── same-origin API + Server-Sent Events ──► FastAPI +
    │ H agent session (Agents API, host: user_device): structured RunReport answer, custom tool     │
    │                                     for logins (the model never sees secrets)                 │
    └───────────────────────────────────────────────────────────────────────────────────────────────┘
-        after each run: replay from H's session history · scores · axe-core scan · Linkup context
+        after each run: replay from H's session history · Holo verdict · scores · axe-core scan · Linkup context
         after the audit: fixes (Devin / hand-written / rule engine) → before/after renders → re-test
 ```
 
 Code map: `poc/runner.py` (one run: Chrome + bridge + H session, watchdog, channel pool), `poc/personas.py`,
-`poc/chrome.py`, `poc/replay.py`, `poc/scoring.py`, `poc/research.py` (Linkup), `poc/static_scan.py` (axe-core),
+`poc/chrome.py`, `poc/replay.py`, `poc/scoring.py`, `poc/judge.py` (Holo verdicts + headline), `poc/research.py` (Linkup), `poc/static_scan.py` (axe-core),
 `poc/fixes.py` + `poc/autofix.py` (fixers), `poc/render.py` (before/after), `poc/export_report.py`,
 `app/jobs.py` (parallel lanes, rounds), `app/main.py` (API), `web/` (UI). The original command-line pipeline still
 works: `poc/audit.py`, `poc/pipeline.py`.
@@ -118,7 +120,9 @@ Tested end to end with real H sessions (5 agents in parallel on Lune, Mugs & Co 
 ## Partner integrations
 
 - **H Company** (core): Agents API sessions on our own Chrome (`host: user_device`), structured output, custom
-  tools, live changes feed, session history for replays, Agent View links.
+  tools, live changes feed, session history for replays, Agent View links. Models API (`holo4-27b`, thinking off,
+  ~1 s; `holo4-35b-a3b` when rate limited) judges each run and writes the report headline (`HUMBLE_JUDGE=off`
+  to use the rules only).
 - **Linkup**: journey suggestions (`/v1/search`, structured output) and the declared accessibility of the site
   (`/v1/fetch` of its accessibility statement).
 - **Devin** writes the fixes (`DevinFixer`, API v3 with structured output, `devin_mode: fast` by default): it gets
@@ -133,7 +137,7 @@ Tested end to end with real H sessions (5 agents in parallel on Lune, Mugs & Co 
 
 Humble accounts use scrypt-hashed passwords and HttpOnly SameSite session cookies; the API checks ownership for
 every report, image, control and export. Run it on loopback. One-time website credentials stay in process memory;
-credentials saved in the **Credential vault** are Fernet-encrypted in SQLite (`data/vault.key`, or
+credentials saved under **Credentials** (the vault) are Fernet-encrypted in SQLite (`data/vault.key`, or
 `HUMBLE_VAULT_KEY`). Logins are typed by our code through a custom tool, so the H model never receives secret
 values; headers are added by the browser. Screenshots and reports can contain site content: use test accounts.
 

@@ -26,6 +26,8 @@
 .score-hero { display: grid; grid-template-columns: auto 1fr auto; gap: 34px; align-items: center; padding: 28px 32px; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 1px 2px #2b25400a, 0 12px 40px -24px #2b254040; }
 .score-hero-copy h2 { font-family: var(--serif); font-weight: 400; font-size: 30px; line-height: 1.2; letter-spacing: -.3px; margin: 8px 0 12px; max-width: 640px; }
 .score-hero-copy h2 b { font-weight: 400; color: var(--accent); }
+.hero-next { margin: -4px 0 12px; color: var(--muted); font-size: 15px; max-width: 640px; }
+.judge-reason { margin: 4px 0 0; font-size: 13px; color: var(--ink, inherit); opacity: .8; }
 .blocked-names { color: var(--poor); }
 .hero-facts { display: grid; grid-template-columns: repeat(3, minmax(110px, auto)); gap: 0; margin: 0; border-left: 1px solid var(--line); }
 .hero-facts > div { padding: 4px 22px; border-right: 1px solid var(--line); }
@@ -298,3 +300,44 @@ td.improved .reeval-cell b { color: var(--good); }
 .home-demo { margin-top: 16px !important; font-size: 13px !important; color: var(--muted) !important; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .home-demo code { font-size: 11.5px; background: #efedf4; padding: 1px 5px; border-radius: 4px; }
 .home-demo small { font-size: 11.5px; }
+
+/* Simplified shell: no top bar, no workspace switcher, no footer. */
+.sidebar nav { margin-top: 34px; }
+.main-content { padding-bottom: 56px; }
+.modal-top h2 { margin-top: 0; }
+.journey-form-heading strong { font-size: 13px; font-weight: 600; }
+.home-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 18px; font-size: 13px; }
+.home-quick .text-button { font-size: 13px; }
+
+/* Saved sites */
+.site-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper); font-size: 13px; font-weight: 550; color: var(--ink); }
+.site-chip:hover { border-color: var(--accent); }
+.site-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.site-picker, .preset-list { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 18px; }
+.site-picker > span, .preset-list > span { font-size: 12px; font-weight: 600; color: var(--muted); margin-right: 4px; }
+.preset-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; border: 1px dashed #cfcbd8; background: transparent; font-size: 13px; color: var(--ink); }
+.preset-chip.on { border-style: solid; border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.check-line { display: flex !important; flex-direction: row !important; align-items: center; gap: 10px; margin-top: 18px; font-size: 13px; font-weight: 500; }
+.check-line input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.field-hint { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; }
+.form-subhead { font-size: 14px; font-weight: 600; margin: 22px 0 12px; }
+.site-list { display: flex; flex-direction: column; gap: 10px; }
+.site-row { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 18px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); }
+.site-main h2 { font-size: 16px; font-weight: 600; margin: 0; }
+.site-main > p { font-size: 13px; color: var(--muted); margin: 2px 0 8px; word-break: break-all; }
+.site-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.site-journey, .site-cred { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 9px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); }
+.site-cred { background: transparent; color: var(--muted); }
+.site-meta .muted { font-size: 12px; color: var(--muted); }
+.site-score { display: flex; align-items: center; gap: 10px; }
+.site-score small { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.site-actions { display: flex; align-items: center; gap: 4px; }
+.site-actions .button { min-height: 34px; padding: 0 14px; font-size: 13px; margin-right: 6px; }
+@media (max-width: 760px) {
+  .site-row { grid-template-columns: auto 1fr; }
+  .site-score, .site-actions { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  .section-heading { flex-wrap: wrap; }
+  .section-heading .search-box { min-width: 0; width: 100%; margin-bottom: 0; }
+}

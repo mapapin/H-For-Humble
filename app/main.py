@@ -215,6 +215,13 @@ class Credentials(BaseModel):
         return value
 
 
+def check_url(value):
+    parsed = urlsplit(value.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("Use an http(s) URL without embedded credentials")
+    return value.strip()
+
+
 class AuditInput(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     url: str = Field(min_length=8, max_length=2000)
@@ -227,14 +234,12 @@ class AuditInput(BaseModel):
     # auto: audit -> fix -> re-audit with the fixes, until every perspective passes or max_rounds
     mode: Literal["standard", "auto"] = "standard"
     max_rounds: int = Field(default=2, ge=1, le=4)
+    save_site: bool = False  # keep this website and these journeys in saved sites
 
     @field_validator("url")
     @classmethod
     def valid_url(cls, value):
-        parsed = urlsplit(value.strip())
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
-            raise ValueError("Use an http(s) URL without embedded credentials")
-        return value.strip()
+        return check_url(value)
 
     @field_validator("personas")
     @classmethod
@@ -312,11 +317,114 @@ def delete_vault(entry_id: str, user=Depends(current_user)):
     return {"ok": True}
 
 
-@app.get("/api/projects")
-def projects(user=Depends(current_user)):
+class SiteJourney(Journey):
+    id: str | None = Field(default=None, max_length=36)
+
+
+class SiteInput(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    url: str = Field(min_length=8, max_length=2000)
+    journeys: list[SiteJourney] = Field(default_factory=list, max_length=20)
+    vault_id: str | None = Field(default=None, max_length=36)
+
+    @field_validator("url")
+    @classmethod
+    def valid_url(cls, value):
+        return check_url(value)
+
+    @field_validator("name")
+    @classmethod
+    def trimmed(cls, value):
+        if not value.strip():
+            raise ValueError("Enter a site name")
+        return value.strip()
+
+
+def _journey_key(j):
+    return (" ".join(j["title"].lower().split()), " ".join(j["goal"].lower().split()))
+
+
+def save_site_journeys(db, project_id, journeys, vault_id=None, replace=False):
+    """Mark a project as a saved site; add journeys (or replace them) as presets, each with a stable id."""
+    row = db.execute("SELECT journeys, vault_id FROM projects WHERE id=?", (project_id,)).fetchone()
+    current = [] if replace else json.loads(row["journeys"] or "[]")
+    known = {_journey_key(j) for j in current}
+    for j in journeys:
+        j = {k: j.get(k) for k in ("id", "title", "goal", "expect_answer_contains")}
+        if _journey_key(j) in known:
+            continue
+        known.add(_journey_key(j))
+        current.append({**j, "id": j.get("id") or uuid.uuid4().hex[:12]})
+    db.execute("UPDATE projects SET saved=1, journeys=?, vault_id=?, updated=? WHERE id=?",
+               (json.dumps(current[:20]), vault_id if (replace or vault_id) else row["vault_id"], time.time(), project_id))
+
+
+def site_rows(db, user_id, site_id=None):
+    q = ("SELECT p.id, p.name, p.url, p.journeys, p.vault_id, p.created, p.updated, COUNT(a.id) AS audit_count, "
+         "MAX(a.created) AS last_audit FROM projects p LEFT JOIN audits a ON a.project_id=p.id "
+         "WHERE p.user_id=? AND p.saved=1" + (" AND p.id=?" if site_id else "") + " GROUP BY p.id ORDER BY COALESCE(p.updated, p.created) DESC")
+    out = []
+    for row in db.execute(q, (user_id, site_id) if site_id else (user_id,)).fetchall():
+        site = store.serialize(row)
+        last = db.execute("SELECT scores FROM audits WHERE project_id=? AND status='completed' ORDER BY created DESC LIMIT 1",
+                          (site["id"],)).fetchone()
+        scores = json.loads(last["scores"] or "{}") if last else {}
+        site.update(origin=vault.origin(site["url"]), last_score=scores.get("score"), last_grade=scores.get("grade"))
+        out.append(site)
+    return out
+
+
+def owned_site(db, site_id, user):
+    rows = site_rows(db, user["id"], site_id)
+    if not rows:
+        raise HTTPException(404, "Saved site not found.")
+    return rows[0]
+
+
+@app.get("/api/sites")
+def list_sites(user=Depends(current_user)):
     with store.connect() as db:
-        rows = db.execute("SELECT p.*, COUNT(a.id) AS audit_count, MAX(a.created) AS last_audit FROM projects p LEFT JOIN audits a ON a.project_id=p.id WHERE p.user_id=? GROUP BY p.id ORDER BY p.created DESC", (user["id"],)).fetchall()
-    return [store.serialize(row) for row in rows]
+        return site_rows(db, user["id"])
+
+
+@app.post("/api/sites", status_code=201)
+def create_site(body: SiteInput, user=Depends(current_user)):
+    """Save a website (or update the saved one with the same URL)."""
+    if body.vault_id:
+        vault.owned(body.vault_id, user["id"])
+    with store.connect() as db:
+        row = db.execute("SELECT id FROM projects WHERE user_id=? AND url=?", (user["id"], body.url)).fetchone()
+        site_id = row["id"] if row else str(uuid.uuid4())
+        if row:
+            db.execute("UPDATE projects SET name=? WHERE id=?", (body.name, site_id))
+        else:
+            db.execute("INSERT INTO projects(id,user_id,name,url,created) VALUES(?,?,?,?,?)",
+                       (site_id, user["id"], body.name, body.url, time.time()))
+        save_site_journeys(db, site_id, [j.model_dump() for j in body.journeys], body.vault_id, replace=True)
+        return owned_site(db, site_id, user)
+
+
+@app.put("/api/sites/{site_id}")
+def update_site(site_id: str, body: SiteInput, user=Depends(current_user)):
+    if body.vault_id:
+        vault.owned(body.vault_id, user["id"])
+    with store.connect() as db:
+        owned_site(db, site_id, user)
+        clash = db.execute("SELECT id FROM projects WHERE user_id=? AND url=? AND id!=?", (user["id"], body.url, site_id)).fetchone()
+        if clash:
+            raise HTTPException(409, "Another site already uses this URL.")
+        db.execute("UPDATE projects SET name=?, url=? WHERE id=?", (body.name, body.url, site_id))
+        save_site_journeys(db, site_id, [j.model_dump() for j in body.journeys], body.vault_id, replace=True)
+        return owned_site(db, site_id, user)
+
+
+@app.delete("/api/sites/{site_id}")
+def forget_site(site_id: str, user=Depends(current_user)):
+    """Remove from saved sites. Its audits stay in the history."""
+    with store.connect() as db:
+        owned_site(db, site_id, user)
+        db.execute("UPDATE projects SET saved=0, journeys='[]', vault_id=NULL WHERE id=?", (site_id,))
+    return {"ok": True}
 
 
 class ResearchInput(BaseModel):
@@ -358,9 +466,7 @@ def launch_audit(body: AuditInput, user, extra: dict | None = None, parent_id: s
     if body.vault_id:
         if credentials.username or credentials.password or credentials.headers:
             raise HTTPException(422, "Choose a vault entry or manual credentials, not both.")
-        entry = vault.owned(body.vault_id, user["id"])
-        if vault.origin(body.url) != entry["origin"]:
-            raise HTTPException(422, "This vault entry belongs to a different website origin. Choose a matching entry.")
+        entry = vault.owned(body.vault_id, user["id"])  # any entry: its website only ranks it first in the wizard
         credentials = Credentials.model_validate(vault.decrypt(user["id"], entry))
         vault_name = entry["name"]
     if not os.environ.get("HAI_API_KEY"):
@@ -373,7 +479,7 @@ def launch_audit(body: AuditInput, user, extra: dict | None = None, parent_id: s
     if manager.current is not None:
         raise HTTPException(409, "Another audit is active on this local server. Wait for it to finish before starting a new one.")
     audit_id, project_id = str(uuid.uuid4()), str(uuid.uuid4())
-    config = body.model_dump(exclude={"credentials"})
+    config = body.model_dump(exclude={"credentials", "save_site"})
     # Whether access was needed (never the values): a re-evaluation must ask for manual credentials again.
     config["uses_login"] = bool(credentials.username or credentials.password)
     config["uses_headers"] = bool(credentials.headers)
@@ -388,7 +494,10 @@ def launch_audit(body: AuditInput, user, extra: dict | None = None, parent_id: s
         if row:
             project_id = row["id"]
         else:
-            db.execute("INSERT INTO projects VALUES(?,?,?,?,?)", (project_id, user["id"], host, body.url, time.time()))
+            db.execute("INSERT INTO projects(id,user_id,name,url,created) VALUES(?,?,?,?,?)",
+                       (project_id, user["id"], host, body.url, time.time()))
+        if body.save_site:
+            save_site_journeys(db, project_id, [t.model_dump() for t in body.tasks], body.vault_id)
         db.execute("INSERT INTO audits(id,user_id,project_id,name,url,status,created,config,parent_id) VALUES(?,?,?,?,?,?,?,?,?)",
                    (audit_id, user["id"], project_id, body.name, body.url, "queued", time.time(), json.dumps(config), parent_id))
     auth = {"headers": credentials.headers}
@@ -455,7 +564,8 @@ def reevaluate(audit_id: str, body: ReevaluateInput, user=Depends(current_user))
     again = AuditInput(name=f"{parent['name']} · with fixes"[:100], url=parent["url"], tasks=cfg["tasks"],
                        personas=cfg["personas"], repetitions=cfg["repetitions"], vault_id=cfg.get("vault_id"),
                        credentials=body.credentials if not cfg.get("vault_id") else Credentials())
-    return launch_audit(again, user, extra={"patch": patch, "mode": "standard"}, parent_id=audit_id)
+    return launch_audit(again, user, extra={"patch": patch, "mode": "standard",
+                                            "parent_score": (parent.get("scores") or {}).get("score")}, parent_id=audit_id)
 
 
 @app.get("/api/audits/{audit_id}/fixes/{filename}")

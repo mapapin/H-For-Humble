@@ -62,7 +62,7 @@ class AppTests(unittest.TestCase):
         self.client.post("/api/auth/logout")
         self.register("other@example.test")
         self.assertEqual(self.client.get("/api/audits").json(), [])
-        self.assertEqual(self.client.get("/api/projects").json(), [])
+        self.assertEqual(self.client.get("/api/sites").json(), [])
         for path in [f"/api/audits/{audit['id']}", f"/api/audits/{audit['id']}/export", f"/api/audits/{audit['id']}/files/live.png", f"/api/audits/{audit['id']}/events"]:
             self.assertEqual(self.client.get(path).status_code, 404)
         self.assertEqual(self.client.post(f"/api/audits/{audit['id']}/stop").status_code, 404)
@@ -140,12 +140,50 @@ class AppTests(unittest.TestCase):
         self.assertNotIn("vault-fixture-user", report)
         self.assertNotIn("vault-fixture-header", report)
         with patch("app.main.manager.start") as start:
-            body["url"] = "http://127.0.0.1:8766/shop"
-            self.assertEqual(self.client.post("/api/audits", json=body).status_code, 422)
-            body["url"] = "http://127.0.0.1:8765/shop"
             body["credentials"] = {"username": "other", "password": "other"}
-            self.assertEqual(self.client.post("/api/audits", json=body).status_code, 422)
+            self.assertEqual(self.client.post("/api/audits", json=body).status_code, 422)  # vault or manual, not both
             start.assert_not_called()
+        # A vault entry stays linked to its website but can be used on another one (the wizard ranks it lower).
+        body.pop("credentials")
+        body["url"] = "http://127.0.0.1:8766/shop"
+        with patch("app.main.manager.start", return_value=True) as start, patch("chrome.chrome_binary", return_value="chrome"), patch.dict("os.environ", {"HAI_API_KEY": "fixture-key"}):
+            self.assertEqual(self.client.post("/api/audits", json=body).status_code, 201)
+        self.assertEqual(start.call_args.args[2]["login"]["username"], "vault-fixture-user")
+
+    def test_saved_sites_with_journey_presets(self):
+        self.register()
+        entry = self.client.post("/api/vault", json=self.vault_body()).json()
+        journey = {"title": "Book a seat", "goal": "Book one seat and report the total.", "expect_answer_contains": "49.00"}
+        site = self.client.post("/api/sites", json={"name": "Lune", "url": "http://127.0.0.1:8770/", "journeys": [journey],
+                                                    "vault_id": entry["id"]})
+        self.assertEqual(site.status_code, 201, site.text)
+        site = site.json()
+        self.assertEqual((site["origin"], site["vault_id"], len(site["journeys"])), ("http://127.0.0.1:8770", entry["id"], 1))
+        self.assertTrue(site["journeys"][0]["id"])
+        # Launching with save_site adds new journeys as presets, without duplicating known ones.
+        body = {"name": "Lune audit", "url": "http://127.0.0.1:8770/", "personas": ["baseline"], "save_site": True,
+                "tasks": [journey, {"title": "Find opening hours", "goal": "Find the opening hours of the shop."}]}
+        with patch("app.main.manager.start", return_value=True), patch("chrome.chrome_binary", return_value="chrome"), patch.dict("os.environ", {"HAI_API_KEY": "fixture-key"}):
+            audit = self.client.post("/api/audits", json=body)
+        self.assertEqual(audit.status_code, 201, audit.text)
+        self.assertNotIn("save_site", audit.json()["config"])
+        sites = self.client.get("/api/sites").json()
+        self.assertEqual(len(sites), 1)
+        self.assertEqual([j["title"] for j in sites[0]["journeys"]], ["Book a seat", "Find opening hours"])
+        self.assertEqual(sites[0]["vault_id"], entry["id"])  # kept: the launch used no vault entry
+        self.assertEqual(sites[0]["audit_count"], 1)
+        # Edit, then forget: the audit stays in the history.
+        edited = self.client.put(f"/api/sites/{site['id']}", json={"name": "Lune studio", "url": "http://127.0.0.1:8770/",
+                                                                  "journeys": sites[0]["journeys"][1:], "vault_id": None})
+        self.assertEqual(edited.status_code, 200, edited.text)
+        self.assertEqual((edited.json()["name"], len(edited.json()["journeys"]), edited.json()["vault_id"]), ("Lune studio", 1, None))
+        self.assertEqual(self.client.delete(f"/api/sites/{site['id']}").status_code, 200)
+        self.assertEqual(self.client.get("/api/sites").json(), [])
+        self.assertEqual(len(self.client.get("/api/audits").json()), 1)
+        # Another account sees nothing and cannot change it.
+        self.client.post("/api/auth/logout")
+        self.register("other@example.test")
+        self.assertEqual(self.client.put(f"/api/sites/{site['id']}", json={"name": "x", "url": "http://127.0.0.1:8770/"}).status_code, 404)
 
     def test_vault_entries_cannot_be_used_or_changed_by_another_account(self):
         self.register()

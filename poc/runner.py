@@ -26,6 +26,7 @@ from hai_agents_local import SeleniumBrowserBridge
 
 from chrome import ChromeProcess, DevToolsController
 from personas import PERSONAS, Persona, build_instructions
+from judge import decide
 from replay import build_replay, fetch_events, latest_thought
 from scoring import run_metrics
 
@@ -816,11 +817,11 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
     expected = task.get("expect_answer_contains")
     rep = record.get("report") or {}
     claimed = bool(rep.get("completed"))
-    if expected:
-        record["success"] = claimed and answer_matches(str(rep.get("answer", "")), expected)
-    else:
-        record["success"] = claimed
     record["metrics"] = run_metrics(record)
+    # Rule: claimed + expected facts found verbatim. Judge (Holo): reads the answer, last thoughts and stats, tolerant
+    # of formats, strict on values; it decides when available (judge.decide keeps the rule's verdict next to it).
+    decide(record, task, claimed and (answer_matches(str(rep.get("answer", "")), expected) if expected else True),
+           persona.label)
     (out_dir / f"{tag}.json").write_text(json.dumps(record, indent=2, default=str))
     print(f"[{tag}] done success={record['success']} steps={record.get('steps')} {record['duration_s']}s", flush=True)
     return record

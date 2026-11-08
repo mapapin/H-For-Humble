@@ -25,15 +25,17 @@ export function ScoreHero({ audit }: { audit: Audit }) {
   const results = audit.results || [];
   const agentTime = results.reduce((n, r) => n + (r.agent_duration_s || 0), 0);
   const cost = results.reduce((n, r) => n + (r.metrics?.cost_usd || 0), 0);
-  let sentence: React.ReactNode;
-  if (s.score == null) sentence = active ? <>Agents are exploring. The score appears as soon as the first perspective finishes.</> : <>No perspective could be scored.</>;
+  let sentence: React.ReactNode, next: string | undefined;
+  if (s.score != null && audit.insight?.headline) { sentence = audit.insight.headline; next = audit.insight.next_step; }
+  else if (s.score == null) sentence = active ? <>Agents are exploring. The score appears as soon as the first perspective finishes.</> : <>No perspective could be scored.</>;
   else if (!s.baseline_ok && per.baseline?.tested) sentence = <>Even the baseline user could not complete {task}. Check the journey goal, or the site itself.</>;
   else sentence = <><b>{s.can_complete} of {s.tested_perspectives}</b> perspectives completed {task}{blocked.length ? <>. <span className="blocked-names">Blocked: {blocked.join(', ')}.</span></> : '.'}{struggling.length ? <> {struggling.map(([k]) => pname(k)).join(', ')} needed far more effort.</> : null}</>;
   return <section className="score-hero" aria-label="Audit score">
     <ScoreRing score={s.score} grade={s.grade} size={156} stroke={12} label="Inclusion score" />
     <div className="score-hero-copy">
-      <span className="eyebrow">INCLUSION SCORE {active && <span className="live-pill"><span className="live-dot" />LIVE</span>}</span>
+      {active && <span className="live-pill"><span className="live-dot" />LIVE</span>}
       <h2>{sentence}</h2>
+      {next && <p className="hero-next">{next}</p>}
       <ScoreExplainer />
     </div>
     <dl className="hero-facts">
@@ -46,7 +48,7 @@ export function ScoreHero({ audit }: { audit: Audit }) {
 
 function ScoreExplainer() {
   return <details className="score-explainer"><summary><Info size={13} />How the score works</summary>
-    <p>Each run scores 0 when the user could not finish the journey. A finished journey starts at 100 and loses points for extra steps and time compared with the baseline user (up to −30 and −15), for retried or blocked actions (up to −15) and for every barrier the agent reported (up to −30). A perspective is the mean of its runs; the audit is the mean of its perspectives. A ≥ 90 · B ≥ 75 · C ≥ 60 · D ≥ 40 · F below.</p></details>;
+    <p>Whether a journey was completed is judged by Holo from the agent’s final answer, its last steps and the expected facts (any format, exact values). Each run scores 0 when the user could not finish the journey. A finished journey starts at 100 and loses points for extra steps and time compared with the baseline user (up to −30 and −15), for retried or blocked actions (up to −15) and for every barrier the agent reported (up to −30). A perspective is the mean of its runs; the audit is the mean of its perspectives. A ≥ 90 · B ≥ 75 · C ≥ 60 · D ≥ 40 · F below.</p></details>;
 }
 
 /** Linkup: what the site declares about its accessibility, next to what the agents measured. */
@@ -129,7 +131,7 @@ function PerspectiveTile({ audit, persona, onReplay, onWatch }: { audit: Audit; 
       {running && <button className="p-replay" onClick={onWatch} aria-label={`Watch the ${pname(persona)} agent live`}><Radio size={16} />Watch live</button>}
     </div>
     <footer>
-      {outcome && <span className={`outcome-chip ${outcome}`}>{outcome === 'pass' ? <CircleCheck size={13} /> : outcome === 'error' ? <AlertOctagon size={13} /> : <CircleX size={13} />}{outcome === 'pass' ? 'Completed' : outcome === 'partial' ? `${score!.completed}/${score!.tested} completed` : outcome === 'error' ? 'Technical error' : 'Blocked'}</span>}
+      {outcome && <span className={`outcome-chip ${outcome}`} title={last?.judge?.reason}>{outcome === 'pass' ? <CircleCheck size={13} /> : outcome === 'error' ? <AlertOctagon size={13} /> : <CircleX size={13} />}{outcome === 'pass' ? 'Completed' : outcome === 'partial' ? `${score!.completed}/${score!.tested} completed` : outcome === 'error' ? 'Technical error' : 'Blocked'}</span>}
       {!outcome && <span className="outcome-chip neutral">{running ? (lane![1].session_id ? 'Exploring' : 'Starting') : waiting ? 'Waiting' : terminal(audit.status) ? 'Not run' : 'Queued'}</span>}
       {score && score.tested > 0 && <dl className="p-metrics">
         <div><dt>Steps</dt><dd>{score.steps ?? '—'}{score.steps_vs_baseline && score.steps_vs_baseline >= 1.15 ? <em>{times(score.steps_vs_baseline)}</em> : null}</dd></div>
@@ -207,7 +209,6 @@ export function StaticCard({ audit }: { audit: Audit }) {
       <span className="static-rule"><a href={v.helpUrl} target="_blank" rel="noreferrer">{v.help}</a><small>{v.id} · {v.nodes} element{v.nodes > 1 ? 's' : ''}{v.wcag.length ? ` · WCAG ${v.wcag.map(wcagLabel).join(', ')}` : ''}</small></span>
       {v.blocked_someone ? <span className="outcome-chip fail">Blocked {v.personas.filter(p => blocked.includes(p)).map(pname).join(', ')}</span> : v.related_to_barrier ? <span className="outcome-chip partial">Related to a barrier</span> : <span className="outcome-chip neutral">No barrier seen</span>}
     </li>)}</ul>}
-    <p className="static-note">Static rules check the code; Humble's agents live the journey. Use both: the agents tell you which findings actually stop people, and what no rule can see.</p>
   </section>;
 }
 

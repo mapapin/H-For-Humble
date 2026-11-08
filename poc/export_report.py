@@ -110,6 +110,9 @@ def build(audit: dict, audit_dir: str | Path, after: dict | None = None) -> str:
     blocked_names = ", ".join(NAMES.get(k, k) for k in blocked)
     headline = (f"<b>{scores.get('can_complete')} of {scores.get('tested_perspectives')}</b> perspectives completed the journey."
                 + (f" <span class='bad'>Blocked: {e(blocked_names)}.</span>" if blocked else "")) if scores.get("score") is not None else "Not scored."
+    insight = audit.get("insight") or {}
+    if insight.get("headline") and scores.get("score") is not None:  # written by Holo from the same results
+        headline = e(insight["headline"]) + (f"<br><small>{e(insight['next_step'])}</small>" if insight.get("next_step") else "")
     if after and after.get("score") is not None:
         done = sum(1 for p in (after.get("perspectives") or {}).values() if p.get("completion") == 1)
         total = len(after.get("perspectives") or {})

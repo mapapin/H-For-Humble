@@ -37,7 +37,7 @@ class WatchTests(unittest.TestCase):
         store.init()
         with store.connect() as db:
             db.execute("INSERT INTO users VALUES('u','U','u@x.test','x',0)")
-            db.execute("INSERT INTO projects VALUES('p','u','site','http://x.test/',0)")
+            db.execute("INSERT INTO projects(id,user_id,name,url,created) VALUES('p','u','site','http://x.test/',0)")
             db.execute("INSERT INTO audits(id,user_id,project_id,name,url,status,created,config) VALUES('a','u','p','A','http://x.test/','queued',0,'{}')")
 
     def tearDown(self):
@@ -54,6 +54,7 @@ class WatchTests(unittest.TestCase):
             {"kind": "progress", "lane": 0, "step": 3, "thought": "Clicking Reserve"},
             {"kind": "run_finished", "lane": 0, "record": record("baseline", True), "completed": 1},
             {"kind": "run_finished", "lane": 1, "record": record("keyboard_only", False, 20), "completed": 2},
+            {"kind": "insight", "insight": {"headline": "Keyboard users could not finish.", "next_step": "", "model": "holo4-27b"}},
             {"kind": "completed"},
         ])
         JobManager()._watch("a", SimpleNamespace(is_alive=lambda: False, join=lambda timeout=None: None), msgs,
@@ -68,6 +69,7 @@ class WatchTests(unittest.TestCase):
         self.assertEqual(a["scores"]["perspectives"]["baseline"]["score"], 100)
         self.assertEqual(a["scores"]["perspectives"]["keyboard_only"]["score"], 0)
         self.assertEqual(sum("Waiting for a free H slot" in e for e in events), 1)  # logged once per lane
+        self.assertEqual(a["insight"]["headline"], "Keyboard users could not finish.")
 
 
 if __name__ == "__main__":

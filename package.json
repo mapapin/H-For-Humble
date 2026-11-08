@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "start": ".venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000",
-    "test": ".venv/bin/python -m unittest discover -s tests"
+    "test": "HUMBLE_JUDGE=off .venv/bin/python -m unittest discover -s tests"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

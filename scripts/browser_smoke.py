@@ -68,7 +68,8 @@ def seed_interface_fixture():
     config["vault_id"] = entries[0]["id"]
     config["vault_name"] = entries[0]["name"]
     with store.connect() as db:
-        db.execute("INSERT INTO projects VALUES(?,?,?,?,?)", (project_id, user["id"], "UI fixture website", "http://127.0.0.1:8765/", time.time()))
+        db.execute("INSERT OR IGNORE INTO projects(id,user_id,name,url,created) VALUES(?,?,?,?,?)", (project_id, user["id"], "UI fixture website", "http://127.0.0.1:8765/", time.time()))
+        project_id = db.execute("SELECT id FROM projects WHERE user_id=? AND url=?", (user["id"], "http://127.0.0.1:8765/")).fetchone()["id"]
         db.execute("INSERT INTO audits(id,user_id,project_id,name,url,status,created,config,results,summary,progress,finished) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                    (audit_id, user["id"], project_id, "UI test fixture · checkout audit", "http://127.0.0.1:8765/", "completed", time.time(), json.dumps(config), json.dumps(records), json.dumps(summarize(records)), '{"completed":20}', time.time()))
     folder = store.DATA / "audits" / audit_id
@@ -88,13 +89,13 @@ try:
     driver.find_element(By.NAME, "name").send_keys("Design review")
     driver.find_element(By.NAME, "email").send_keys(f"review-{secrets.token_hex(4)}@humble.test")
     driver.find_element(By.NAME, "password").send_keys(secrets.token_urlsafe(16))
-    click("Create your workspace")
+    click("Create account")
     wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".home-hero")))
     time.sleep(1)
     driver.save_screenshot(str(OUT / "overview-desktop.png"))
     findings += accessibility("overview")
     driver.get("http://127.0.0.1:8000/#vault")
-    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".vault-intro")))
+    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".page-heading")))
     click("Add credentials")
     fields = driver.find_elements(By.CSS_SELECTOR, ".vault-editor input")
     for field, value in zip(fields, ["UI fixture login", "http://127.0.0.1:8765", "qa@fixture.test", "browser-fixture-password"]):
@@ -108,9 +109,9 @@ try:
     click("New audit")
     wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".modal")))
     fields = driver.find_elements(By.CSS_SELECTOR, ".wizard-content input")
-    fields[0].send_keys("Checkout accessibility")
-    fields[1].send_keys("http://127.0.0.1:8765/")
-    click("Use credential vault")
+    fields[0].send_keys("http://127.0.0.1:8765/")
+    fields[1].send_keys("Checkout accessibility")
+    click("From the vault")
     dropdown = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".vault-link-panel select")))
     from selenium.webdriver.support.ui import Select
     wait.until(lambda d: len(dropdown.find_elements(By.TAG_NAME, "option")) == 2)
@@ -125,7 +126,27 @@ try:
     driver.save_screenshot(str(OUT / "audit-configuration.png"))
     findings += accessibility("configuration")
     assert len(driver.find_elements(By.CSS_SELECTOR, ".persona-choice.selected")) == 5
-    driver.find_element(By.CSS_SELECTOR, '[aria-label="Close audit configuration"]').click()
+    driver.find_element(By.CSS_SELECTOR, '.modal-top [aria-label="Close"]').click()
+    # Saved sites: add one with a journey preset, then start an audit from it.
+    driver.get("http://127.0.0.1:8000/#sites")
+    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".page-heading")))
+    click("Add a site")
+    fields = driver.find_elements(By.CSS_SELECTOR, ".modal input, .modal textarea")
+    for field, value in zip(fields, ["Mugs & Co", "http://127.0.0.1:8765/", "Find a mug", "Find a blue mug, add it to the cart and report the total. Stop before paying."]):
+        field.send_keys(value)
+    from selenium.webdriver.support.ui import Select as _Select
+    _Select(driver.find_element(By.CSS_SELECTOR, ".modal select")).select_by_visible_text("UI fixture login")
+    click("Save site")
+    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".site-row")))
+    driver.save_screenshot(str(OUT / "sites-desktop.png"))
+    findings += accessibility("sites")
+    click("Audit")
+    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".modal .site-chip.on")))
+    assert _Select(driver.find_element(By.CSS_SELECTOR, ".vault-link-panel select")).first_selected_option.text == "UI fixture login"
+    click("Continue")
+    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.preset-chip[aria-pressed="true"]')))
+    assert driver.find_element(By.CSS_SELECTOR, ".journey-form input").get_attribute("value") == "Find a mug"
+    driver.find_element(By.CSS_SELECTOR, '.modal-top [aria-label="Close"]').click()
     audit_id = seed_interface_fixture()
     driver.get(f"http://127.0.0.1:8000/#audit/{audit_id}")
     wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".perspective-grid")))
@@ -141,9 +162,9 @@ try:
     driver.find_element(By.CSS_SELECTOR, '[aria-label="Close replay"]').click()
     click("Run again")
     wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".vault-link-panel")))
-    assert driver.find_element(By.CSS_SELECTOR, '.access-choice button[aria-pressed="true"]').text == 'Use credential vault'
-    assert wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.vault-selected strong'))).text == 'UI fixture login'
-    driver.find_element(By.CSS_SELECTOR, '[aria-label="Close audit configuration"]').click()
+    assert driver.find_element(By.CSS_SELECTOR, '.access-choice button[aria-pressed="true"]').text == 'From the vault'
+    wait.until(lambda d: Select(d.find_element(By.CSS_SELECTOR, ".vault-link-panel select")).first_selected_option.text == 'UI fixture login')
+    driver.find_element(By.CSS_SELECTOR, '.modal-top [aria-label="Close"]').click()
     click("Fixes")
     wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".fixes-panel")))
     findings += accessibility("fixes")
@@ -169,7 +190,7 @@ try:
     driver.get("http://127.0.0.1:8000/#settings")
     wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".settings-grid")))
     findings += accessibility("settings")
-    click("Sign out of this account")
+    click("Sign out")
     wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".auth-form")))
     errors = [entry for entry in driver.get_log("browser") if entry["level"] == "SEVERE" and "401" not in entry["message"]]
     assert not errors, json.dumps(errors)

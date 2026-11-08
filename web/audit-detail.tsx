@@ -81,12 +81,12 @@ export function AuditDetail({ id, onBack, onRerun, onUpdate, onOpen = next => { 
       {tab === 'report' && <>
         <PerspectiveGrid audit={audit} onReplay={setReplay} />
         <div className="report-columns">
-          <section className="section"><div className="section-heading"><div><h2>What stopped users</h2><p>Reported by the agents, worst first. Open the replay to see it happen.</p></div></div><BarrierList audit={audit} onReplay={setReplay} /></section>
-          <section className="section"><div className="section-heading"><div><h2>Effort compared with the baseline</h2><p>The same journey, the same agent, one impairment.</p></div></div><EffortChart audit={audit} />{!audit.scores?.perspectives && <div className="quiet-note">Appears when two perspectives have finished.</div>}</section>
+          <section className="section"><div className="section-heading"><h2>What stopped users</h2></div><BarrierList audit={audit} onReplay={setReplay} /></section>
+          <section className="section"><div className="section-heading"><h2>Effort vs the baseline user</h2></div><EffortChart audit={audit} />{!audit.scores?.perspectives && <div className="quiet-note">Appears when two perspectives have finished.</div>}</section>
         </div>
         <StaticCard audit={audit} />
-        {fixCount > 0 && <button className="fix-teaser" onClick={() => setTab('fixes')}><Sparkles size={18} /><span><strong>{fixCount} suggested fix{fixCount > 1 ? 'es' : ''}, with before/after previews</strong><small>{audit.parent ? 'Compare this re-evaluation with the original audit.' : 'See each fix as the blocked user would, then evaluate again with the fixes applied.'}</small></span><ArrowUpRight size={16} /></button>}
-        <p className="report-footnote">Simulated users driven by H computer-use agents, not an accessibility certification. Technical errors are excluded from scores.</p>
+        {fixCount > 0 && <button className="fix-teaser" onClick={() => setTab('fixes')}><Sparkles size={18} /><span><strong>{fixCount} suggested fix{fixCount > 1 ? 'es' : ''}, with before/after previews</strong><small>{audit.parent ? 'Compare with the original audit.' : 'Preview each fix, then re-test with them applied.'}</small></span><ArrowUpRight size={16} /></button>}
+        <p className="report-footnote">Simulated users driven by H agents, not an accessibility certification.</p>
       </>}
       {tab === 'fixes' && <FixesPanel audit={audit} onOpen={onOpen} />}
       {tab === 'activity' && <section className="activity-panel"><h2>Activity</h2><div className="event-list">{audit.events?.length ? audit.events.map(e => <div className="event-item" key={e.id}><span className={`event-dot ${e.kind}`} /><time>{new Date(e.created * 1000).toLocaleTimeString('en-GB')}</time><p>{e.message}</p></div>) : <p>Preparing the event feed…</p>}</div></section>}

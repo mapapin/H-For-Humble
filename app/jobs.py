@@ -238,6 +238,16 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
             patch = merge_patches(patch, new)
             entry["new_fixes"] = [f["id"] for f in new["fixes"]]
             emit("round_finished", entry=entry)
+        try:  # the report headline, written by Holo from the scorecard and the barriers the agents reported
+            from judge import headline
+            before = config.get("parent_score")
+            if before is None and auto and first_round is not round_records:
+                before = scorecard(first_round, personas)["score"]
+            insight = headline(card, round_records, config["tasks"], before)
+            if insight:
+                emit("insight", insight=insight)
+        except Exception:
+            pass
         # Suggested fixes with before/after images. Auto: the final patch on the pages users first saw.
         # Standard: ask the fixer about what failed (a re-evaluation only gets fixes it did not have yet).
         try:
@@ -343,6 +353,8 @@ class JobManager:
                     if t:
                         store.event(audit_id, "progress", f"axe-core static scan: {t.get('rules', 0)} rule violations "
                                     f"on {len(item['static'].get('pages', []))} pages.")
+                elif kind == "insight":
+                    store.update(audit_id, insight=item["insight"])
                 elif kind == "context":
                     store.update(audit_id, context=item["context"])
                     store.event(audit_id, "progress", "Linkup found the site's declared accessibility context.")
