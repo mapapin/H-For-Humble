@@ -221,7 +221,8 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
                 if auto:
                     emit("round_finished", entry=entry)
                 break
-            emit("progress", message="Some perspectives still fail. Asking for fixes.")
+            emit("progress", phase="fixes", message="Some perspectives still fail. Asking "
+                 + ("Devin" if getattr(fixer, "source", "") == "devin" else "the fixer") + " for fixes.")
             new = fixer.generate(round_records, rows, out_dir, site, patch)
             if not new["fixes"]:
                 entry["stopped"] = "No new fix to suggest."
@@ -241,7 +242,9 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
                                      "new_fix_ids": [f["id"] for f in patch["fixes"]], "created": time.time()})
             elif not auto and not config.get("patch") and needs_fix(round_records, rows):
                 # (a re-evaluation compares with its parent audit instead: its snapshots already include the fixes)
-                emit("progress", message="Asking for fix suggestions and rendering before/after images.")
+                emit("progress", phase="fixes", message=("Devin is writing fixes for the perspectives that struggled "
+                     "(a few minutes); the results above are final." if getattr(fixer, "source", "") == "devin" else
+                     "Writing fix suggestions and rendering before/after images."))
                 sug = suggest_fixes(round_records, rows, out_dir, site, fixer, previous=config.get("patch"),
                                     out_dir=fix_dir)
                 emit("fixes", fixes=sug)

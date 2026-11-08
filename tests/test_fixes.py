@@ -111,9 +111,6 @@ class ReevaluateApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 409, r.text)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class ExportTests(unittest.TestCase):
     def test_report_builds_without_images_or_scores(self):
@@ -129,3 +126,23 @@ class ExportTests(unittest.TestCase):
         self.assertIn("Fixture &lt;audit&gt;", page)  # escaped
         self.assertIn("Dates are not focusable", page)
         self.assertIn("data-replay", page)
+
+
+class FallbackTests(unittest.TestCase):
+    def test_devin_failure_falls_back_to_local_fixes(self):
+        from fixes import FallbackFixer
+
+        class Broken:
+            source = "devin"
+            def generate(self, *a, **k):
+                raise TimeoutError("no answer")
+
+        fixer = FallbackFixer(Broken(), CannedFixer(DEMO))
+        out = fixer.generate([], rows(keyboard_only=0.0), "/unused", SITE)
+        self.assertEqual([f["id"] for f in out["fixes"]], ["checkout-keyboard"])
+        self.assertEqual(out["fallback_reason"], "TimeoutError")
+        self.assertEqual(fixer.source, "canned")
+
+
+if __name__ == "__main__":
+    unittest.main()

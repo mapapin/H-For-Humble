@@ -104,15 +104,21 @@ def failing_personas(rows: list[dict], pass_rate: float = 1.0) -> list[str]:
     return sorted({r["persona"] for r in rows if (r.get("success_rate") or 0) < pass_rate})
 
 
-def collect_findings(records: list[dict]) -> list[dict]:
-    """Failed runs (not harness errors) with what the agent reported and the pages it saw."""
+def collect_findings(records: list[dict], include_struggling: bool = False) -> list[dict]:
+    """Failed runs (not harness errors) with what the agent reported and the pages it saw; with include_struggling,
+    also completed runs that reported barriers (non-baseline)."""
     out = []
     for r in records:
-        if r.get("success") or r.get("status") == "harness_error":
+        if r.get("status") == "harness_error":
+            continue
+        struggling = include_struggling and r.get("success") and r.get("persona") != "baseline" and \
+            (r.get("report") or {}).get("obstacles")
+        if r.get("success") and not struggling:
             continue
         rep = r.get("report") or {}
         out.append({
             "persona": r["persona"], "task": r["task"], "tag": r["tag"], "steps": r.get("steps"),
+            "completed": bool(r.get("success")),
             "answer": rep.get("answer"), "summary": rep.get("summary"), "obstacles": rep.get("obstacles", []),
             "snapshots": r.get("snapshots", []),
         })
@@ -120,7 +126,11 @@ def collect_findings(records: list[dict]) -> list[dict]:
 
 
 def _strip_scripts(html: str) -> str:
-    return re.sub(r"<script\b[^>]*>.*?</script>", "", html, flags=re.S | re.I)
+    """The page for an LLM: no scripts, no inline SVG artwork, no runs of whitespace."""
+    html = re.sub(r"<script\b[^>]*>.*?</script>", "", html, flags=re.S | re.I)
+    html = re.sub(r"(<svg\b[^>]*>).*?</svg>", r"\1…</svg>", html, flags=re.S | re.I)
+    html = re.sub(r"\s+", " ", html)
+    return html
 
 
 # ------------------------------------------------------------------------------------------ fixers
@@ -164,27 +174,45 @@ class DevinFixer:
         self.base = f"{base_url}/organizations/{self.org_id}"
         self.http = httpx.Client(headers={"Authorization": f"Bearer {self.api_key}"}, timeout=60)
 
-    def build_prompt(self, records: list[dict], base_dir: str | Path, site: dict, previous: dict | None) -> str:
-        findings = collect_findings(records)
+    def build_prompt(self, records: list[dict], base_dir: str | Path, site: dict, previous: dict | None,
+                     personas: list[str] | None = None) -> str:
+        """Everything Devin needs: who struggled and how, what the journey was, and the pages as those users saw them.
+        personas: perspectives to fix (default: those that failed); struggling ones are included too."""
+        findings = [f for f in collect_findings(records, include_struggling=True)
+                    if personas is None or f["persona"] in personas]
         pages: dict[str, str] = {}
         for f in findings:
-            for snap in f["snapshots"]:
-                if snap["url"] not in pages:
+            for snap in reversed(f["snapshots"]):  # the pages where they ended up first
+                if snap["url"] not in pages and len(pages) < 4:
                     html = _strip_scripts((Path(base_dir) / snap["file"]).read_text())
-                    pages[snap["url"]] = html[:40_000]
+                    pages[snap["url"]] = html[:24_000]
+        goals = {r["task"]: r.get("goal") for r in records if r.get("goal")}
         lines = [
-            f"You are fixing accessibility problems on {site['start_url']}. Simulated users with impairments "
-            "(AI agents whose browser simulates the impairment) tried real tasks on the site and failed. "
-            "For each problem, write a PREVIEW FIX that we inject into the live page (CSS and/or a JS function "
-            "body run after DOMContentLoaded; idempotent; no external dependencies; target elements with robust "
-            "selectors taken from the HTML below; keep the page working for everyone), plus the proper "
-            "source-code change a developer should make. One fix per problem; name the WCAG 2.2 criterion. "
-            "Do not open pull requests and do not modify any repository: only return the structured output.",
+            f"You are fixing accessibility barriers on {site['start_url']}. AI agents (H computer-use agents) tried a real "
+            "user journey in a browser that simulates an impairment, and some of them failed or struggled. For each "
+            "barrier, write ONE fix with:",
+            "- a PREVIEW that our tool injects into the page: `css` (a stylesheet) and/or `js` (the BODY of a function run "
+            "after DOMContentLoaded, idempotent, no external dependencies, robust selectors taken from the HTML below). "
+            "The preview runs (a) on the live page, where the agents are re-run to check the fix, and (b) on a static copy "
+            "of the page with its <script> tags removed (for before/after images): so the JS must not rely on the "
+            "page's own scripts and must work in both cases (e.g. replace a clickable <div onclick=\"f()\"> with a real "
+            "<button> that calls the same global function if it exists, or performs the same visible change);",
+            "- `page_url`: the exact URL (from the list below) of the page the fix applies to; the preview only runs there;",
+            "- `personas`: the ids of the perspectives it unblocks, among: baseline, low_vision (page zoomed to 200% "
+            "with blurred vision), color_blind (deuteranopia: red and green look the same), tremor (every click lands up "
+            "to 10 px off target), keyboard_only (no mouse: Tab, Shift+Tab, Enter, Space, arrow keys);",
+            "- `wcag` (WCAG 2.2 criterion), `title`, `description` (for a product team) and `code_change` (the proper fix "
+            "a developer should make in the source).",
+            "Keep the page working for everyone; do not change the content, prices or dates. Do not open pull requests "
+            "and do not modify any repository: only return the structured output.",
             "",
-            "## Personas and what blocked them",
+            "## The journey",
         ]
+        lines += [f"- `{t}`: {g}" for t, g in goals.items()] or ["- (see the agents' reports below)"]
+        lines += ["", "## Perspectives that failed or struggled, in the agents' own words"]
         for f in findings:
-            lines.append(f"- persona `{f['persona']}` on task `{f['task']}`: {f['summary']}")
+            lines.append(f"- `{f['persona']}` ({'completed with difficulty' if f.get('completed') else 'could not complete'}"
+                         f", {f.get('steps')} steps): {f['summary']}")
             for o in f["obstacles"]:
                 lines.append(f"  - [{o.get('severity')}] at {o.get('where')}: {o.get('what')}")
         if previous and previous.get("fixes"):
@@ -196,8 +224,11 @@ class DevinFixer:
         return "\n".join(lines)
 
     def generate(self, records: list[dict], rows: list[dict], base_dir: str | Path, site: dict,
-                 previous: dict | None = None) -> dict:
-        prompt = self.build_prompt(records, base_dir, site, previous)
+                 previous: dict | None = None, personas: list[str] | None = None) -> dict:
+        if personas is None:
+            from autofix import needs_fix
+            personas = needs_fix(records, rows)
+        prompt = self.build_prompt(records, base_dir, site, previous, personas=personas)
         r = self.http.post(f"{self.base}/sessions", json={
             "prompt": prompt,
             "title": f"Accessibility fixes for {urlparse(site['start_url']).netloc}",
@@ -216,6 +247,7 @@ class DevinFixer:
             s = self.http.get(f"{self.base}/sessions/{sid}").json()
             out = s.get("structured_output")
             status, detail = s.get("status"), s.get("status_detail")
+            print(f"Devin {sid}: {status}/{detail} · structured output: {bool(out)}", flush=True)
             if out and out.get("fixes") is not None and (detail in ("finished", "waiting_for_user")
                                                          or status in ("exit", "suspended")):
                 return {"source": self.source, "devin_session_url": url, "summary": out.get("summary", ""),
@@ -223,6 +255,29 @@ class DevinFixer:
             if status == "error" or (status in ("exit", "suspended") and not out):
                 raise RuntimeError(f"Devin session {url} ended without fixes ({status}/{detail})")
         raise TimeoutError(f"Devin session {url} gave no fixes within {self.timeout_s:.0f}s")
+
+
+class FallbackFixer:
+    """Devin first; if it fails or times out, hand-written fixes for known sites + the rule engine, so an audit always
+    gets fixes."""
+
+    def __init__(self, primary, fallback) -> None:
+        self.primary, self.fallback = primary, fallback
+        self.source = primary.source
+        self.error: str | None = None
+
+    def generate(self, records, rows, base_dir, site, previous=None) -> dict:
+        try:
+            out = self.primary.generate(records, rows, base_dir, site, previous)
+            if out.get("fixes"):
+                self.source = self.primary.source
+                return out
+            self.error = "Devin returned no fix"
+        except Exception as exc:
+            self.error = f"{type(exc).__name__}"
+        out = self.fallback.generate(records, rows, base_dir, site, previous)
+        self.source = out.get("source") or self.fallback.source
+        return {**out, "fallback_reason": self.error}
 
 
 def make_fixer(kind: str, canned_path: str | Path | None = None):
@@ -234,10 +289,11 @@ def make_fixer(kind: str, canned_path: str | Path | None = None):
         from autofix import RuleFixer
         return RuleFixer()
     if kind == "auto":  # Devin when configured, else hand-written fixes for known sites + rules for any site
-        if os.environ.get("DEVIN_API_KEY") and os.environ.get("DEVIN_ORG_ID"):
-            return DevinFixer()
         from autofix import CompositeFixer
-        return CompositeFixer(CannedFixer(canned_path or Path(__file__).parent / "fixes"))
+        local = CompositeFixer(CannedFixer(canned_path or Path(__file__).parent / "fixes"))
+        if os.environ.get("DEVIN_API_KEY") and os.environ.get("DEVIN_ORG_ID"):
+            return FallbackFixer(DevinFixer(timeout_s=1200), local)
+        return local
     raise ValueError(f"unknown fixer {kind!r}")
 
 
