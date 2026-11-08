@@ -113,3 +113,19 @@ class ReevaluateApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExportTests(unittest.TestCase):
+    def test_report_builds_without_images_or_scores(self):
+        from export_report import build
+        audit = {"name": "Fixture <audit>", "url": "http://127.0.0.1:8770/", "config": {"tasks": [{"id": "t", "title": "Book"}],
+                 "personas": ["baseline", "keyboard_only"]}, "results": [
+                 {"persona": "keyboard_only", "task": "t", "run": 0, "tag": "t__keyboard_only__0", "success": False,
+                  "report": {"obstacles": [{"severity": "blocking", "where": "Workshop", "what": "Dates are not focusable"}]},
+                  "replay": {"frames": [{"file": "frames/missing/000.jpg"}], "steps": [{"thought": "Tab", "frame": 0, "action": {"kind": "keys", "label": "Press Tab"}}]}}],
+                 "scores": {"score": 50, "grade": "D", "perspectives": {"keyboard_only": {"completion": 0, "grade": "F", "score": 0, "barriers": 1}}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            page = build(audit, tmp)
+        self.assertIn("Fixture &lt;audit&gt;", page)  # escaped
+        self.assertIn("Dates are not focusable", page)
+        self.assertIn("data-replay", page)
