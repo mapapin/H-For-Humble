@@ -132,7 +132,7 @@ Channel cancellation is also attempted and checked; H may still retain channel s
   `cancel_session`, `pause_session` nor `force_session_answer` ends them; they hold their slot until stopped from
   the H web UI. Single sessions started fine at the same time (both `holo4-27b` and `holo4-35b-a3b`). Taking over the stuck session's browser channel with a new session (which H's docs say cancels the earlier one) did not end it either. Humble now
   starts agents one after another (the next waits for the previous one's first step, at most 40 s), detects a
-  session without a first step after 90 s, retries it once on a fresh channel, and lists stuck sessions with their
+  session without a first step 30 s after it starts running (healthy ones take 2-5 s), retries it once on a fresh channel, and lists stuck sessions with their
   Agent View links in the report so they can be stopped.
 - **Channel slots still leak** (~25–30 min after the run). Humble recycles its own channels: a pending channel can
   be bound again by a new bridge + session (1 new slot instead of 2). Channels released less than 10 minutes ago

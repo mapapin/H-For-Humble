@@ -204,6 +204,10 @@ class DevinFixer:
             "to 10 px off target), keyboard_only (no mouse: Tab, Shift+Tab, Enter, Space, arrow keys);",
             "- `wcag` (WCAG 2.2 criterion), `title`, `description` (for a product team) and `code_change` (the proper fix "
             "a developer should make in the source).",
+            "Keyboard fixes must keep the journey short: a group of similar controls (calendar days, a date grid, "
+            "tabs, a menu, a list of options) is ONE Tab stop, with arrow keys moving inside it (roving tabindex: the "
+            "selected or first available item has tabindex=0, the others -1). Never make every item a Tab stop: "
+            "keyboard users would have to press Tab dozens of times to reach the next control.",
             "Keep the page working for everyone; do not change the content, prices or dates. Do not open pull requests "
             "and do not modify any repository: only return the structured output.",
             "",

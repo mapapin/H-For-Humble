@@ -107,7 +107,7 @@ works: `poc/audit.py`, `poc/pipeline.py`.
 
 Tested end to end with real H sessions (5 agents in parallel on Lune, Mugs & Co and mousquetaires.com).
 
-- **Watchdogs**: a session with no first step after 90 s, or no new step for 3 minutes, is stopped and retried
+- **Watchdogs**: a session with no first step 30 s after it starts (healthy ones take 2-5 s), or no new step for 3 minutes, is stopped and retried
   once on a fresh browser channel. Two failing cases stop the audit so it never burns more H slots.
 - **H slots**: H keeps a finished browser channel (and its slot) for ~25–30 minutes. Humble checks the quota before
   each run, waits (visibly) for free slots, and recycles its own channels released in the last 10 minutes, so a

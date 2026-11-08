@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw
 from app import store
 from app.main import app, login_attempts
 from fixes import CannedFixer, merge_patches, patch_script
-from render import crop_to_content
+from render import crop_to_content, focus_selectors, summarize_changes
 
 DEMO = Path(__file__).resolve().parents[1] / "poc" / "fixes" / "demo_shop.json"
 SITE = {"start_url": "http://127.0.0.1:8765/"}
@@ -54,6 +54,21 @@ class FixTests(unittest.TestCase):
                 self.assertEqual(b.size, a.size)
                 self.assertLess(a.width, 1280)
             self.assertTrue(0 < split < 100)
+
+
+class PreviewTests(unittest.TestCase):
+    def test_focus_fixes_name_the_controls_to_focus(self):
+        css = ":focus-visible { outline: 3px solid } .day:focus-visible { x: 1 } .stepper:focus-within, .stepper button:focus-visible { y: 2 }"
+        self.assertEqual(focus_selectors([{"css": css}]), [".day", ".stepper", ".stepper button"])
+        self.assertIsNone(focus_selectors([{"css": ".total { color: #000 }"}]))
+
+    def test_page_changes_read_as_short_lines(self):
+        changes = ([{"kind": "attr", "el": "div.day.is-open", "name": "role", "value": "button"}] * 24
+                   + [{"kind": "attr", "el": "div.day", "name": "aria-label", "value": f"Tuesday {i} December"} for i in range(24)]
+                   + [{"kind": "attr", "el": "div.grid", "name": "role", "value": "group"}]
+                   + [{"kind": "add", "el": "span.status", "text": "full"}] * 3)
+        self.assertEqual(summarize_changes(changes), [
+            'role="button" on 24 div.day', 'aria-label on 24 div.day, e.g. "Tuesday 0 December"', "adds 3 span.status"])
 
 
 class ReevaluateApiTests(unittest.TestCase):

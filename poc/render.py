@@ -29,6 +29,7 @@ _BADGE = ("position:absolute;z-index:2147483647;font:bold 11px/1.2 Arial,sans-se
 OVERLAYS = {
     "keyboard_only": """
 setTimeout(function () {
+  window.__auditOverlayStarted = true;
   var focusable = 'a[href],button:not([disabled]),input:not([type=hidden]):not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])';
   var n = 0;
   function badge(el, text, color) {
@@ -53,6 +54,7 @@ setTimeout(function () {
 """ % {"badge": _BADGE},
     "tremor": """
 setTimeout(function () {
+  window.__auditOverlayStarted = true;
   var targets = 'a[href],button,input:not([type=hidden]),select,textarea,[onclick],[role=button]';
   document.querySelectorAll(targets).forEach(function (el) {
     var r = el.getBoundingClientRect();
@@ -70,6 +72,110 @@ setTimeout(function () {
 """ % {"badge": _BADGE},
 }
 
+# What a fix does to the page, recorded from DOMContentLoaded (before the fix runs) until an overlay starts: proof
+# of what it changed when nothing changes on screen (roles, names, tab order...).
+RECORDER = """/* __auditRaw */
+window.__auditChanges = [];
+document.addEventListener('DOMContentLoaded', function () {
+  function name(el) {
+    if (!el || el.nodeType !== 1) return '';
+    var cls = (el.getAttribute('class') || '').trim().split(/\\s+/).filter(Boolean).slice(0, 2);
+    return el.tagName.toLowerCase() + (cls.length ? '.' + cls.join('.') : '');
+  }
+  new MutationObserver(function (records) {
+    if (window.__auditOverlayStarted) return;
+    records.forEach(function (r) {
+      if (window.__auditChanges.length > 2000) return;
+      if (r.type === 'attributes') {
+        var a = r.attributeName;
+        if (/^data-/.test(a) || a === 'class' || a === 'style') return;
+        window.__auditChanges.push({kind: 'attr', el: name(r.target), name: a, value: r.target.getAttribute(a)});
+      } else {
+        r.addedNodes.forEach(function (n) {
+          if (n.nodeType === 1 && !(n.tagName === 'STYLE' && n.dataset.auditFix))
+            window.__auditChanges.push({kind: 'add', el: name(n), text: (n.textContent || '').trim().slice(0, 60)});
+        });
+      }
+    });
+  }).observe(document.documentElement, {subtree: true, attributes: true, childList: true});
+});
+"""
+
+# Focus styles only show on a focused element: focus the largest visible control a fix styles, else the largest
+# visible focusable element, in both images.
+FOCUS = """
+setTimeout(function () {
+  var sels = %s;
+  var focusable = 'a[href],button:not([disabled]),input:not([type=hidden]):not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])';
+  function rect(el) { return el.getBoundingClientRect(); }
+  function shown(el) { var r = rect(el); return r.width > 0 && r.height > 0 && r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth; }
+  function area(el) { var r = rect(el); return r.width * r.height; }
+  var pick = null;
+  sels.forEach(function (s) {
+    try { document.querySelectorAll(s).forEach(function (el) {
+      if (el.matches(focusable) && shown(el) && area(el) >= 600 && (!pick || area(el) > area(pick))) pick = el;
+    }); } catch (e) {}
+  });
+  if (!pick) document.querySelectorAll(focusable).forEach(function (el) {
+    if (shown(el) && area(el) < innerWidth * innerHeight * 0.2 && (!pick || area(el) > area(pick))) pick = el;
+  });
+  if (pick) pick.focus({focusVisible: true});
+}, 100);
+"""
+
+
+def focus_selectors(fixes: list[dict]) -> list[str] | None:
+    """Selectors a fix styles on focus (".day:focus-visible" -> ".day"), or None if no fix styles focus."""
+    css = " ".join(f.get("css") or "" for f in fixes)
+    if ":focus" not in css:
+        return None
+    found: list[str] = []
+    for group in re.findall(r"([^{}]+)\{", css):
+        for sel in group.split(","):
+            if ":focus" in sel:
+                base = re.sub(r":focus(-visible|-within)?", "", sel).strip()
+                if base and base != "*" and base not in found:
+                    found.append(base)
+    return found
+
+
+def summarize_changes(changes: list[dict], limit: int = 4) -> list[str]:
+    """A few lines a product team can read: 'role="button" on 24 div.day', 'aria-label on 24 div.day, e.g. "..."'."""
+    from collections import Counter
+
+    lines: list[str] = []
+    by_attr: dict[str, list[dict]] = {}
+    for c in changes:
+        if c.get("kind") == "attr" and c.get("value") is not None:
+            by_attr.setdefault(c["name"], []).append({**c, "el": c["el"].split(".")[0] + (
+                "." + c["el"].split(".")[1] if "." in c["el"] else "")})
+    for attr, items in by_attr.items():
+        value, count = Counter(i["value"] for i in items).most_common(1)[0]
+        if count * 2 >= len(items):  # one value for most elements: role="button", tabindex="0"
+            same = [i for i in items if i["value"] == value]
+            el, n = Counter(i["el"] for i in same).most_common(1)[0]
+            shown = f'="{value[:40]}"' if value else ""
+            lines.append(f"{attr}{shown} on {n} {el}" if n > 1 else f"{attr}{shown} on {el}")
+        else:  # a different value per element: aria-label, aria-pressed...
+            el, n = Counter(i["el"] for i in items).most_common(1)[0]
+            example = next((i["value"] for i in items if i["el"] == el and i["value"]), value)
+            lines.append(f'{attr} on {n} {el}, e.g. "{example[:60]}"' if n > 1 else f'{attr}="{example[:60]}" on {el}')
+    added = Counter(".".join(c["el"].split(".")[:2]) for c in changes if c.get("kind") == "add" and c.get("el"))
+    for el, n in added.most_common(2):
+        lines.append(f"adds {n} {el}" if n > 1 else f"adds {el}")
+    return lines[:limit]
+
+
+def changed_share(before: Path, after: Path) -> float:
+    """Share of pixels that differ between the two images (0 to 1)."""
+    from PIL import Image, ImageChops
+
+    a, b = Image.open(before).convert("RGB"), Image.open(after).convert("RGB")
+    if a.size != b.size:
+        return 1.0
+    mask = ImageChops.difference(a, b).convert("L").point(lambda v: 255 if v > 24 else 0)
+    return mask.histogram()[255] / (a.width * a.height)
+
 
 def prepare_snapshot(html: str, url: str, scripts: list[str]) -> str:
     """Static copy of a captured page: original scripts removed (the DOM is already rendered), <base> to the real
@@ -78,7 +184,7 @@ def prepare_snapshot(html: str, url: str, scripts: list[str]) -> str:
     page_path = json.dumps(urlparse(url).path or "/")
     inject = f'<base href="{url}"><script>window.__auditPagePath = {page_path};</script>' + "".join(
         f"<script>document.addEventListener('DOMContentLoaded', function () {{ {s} }});</script>"
-        if "__auditPatchApplied" not in s else f"<script>{s}</script>"
+        if "__auditPatchApplied" not in s and "__auditRaw" not in s else f"<script>{s}</script>"
         for s in scripts
     )
     m = re.search(r"<head[^>]*>", html, flags=re.I)
@@ -99,17 +205,28 @@ class PersonaRenderer:
         self.tmp = Path(tempfile.mkdtemp(prefix="audit-render-"))
 
     def render(self, html: str, url: str, out_png: Path, fixes: list[dict] | None = None,
-               overlay: bool = True) -> Path:
-        scripts = [patch_script(fixes)] if fixes else []
+               overlay: bool = True, focus: list[str] | None = None) -> list[dict]:
+        """Screenshot to out_png; returns what the fixes changed in the page (attributes set, elements added)."""
+        scripts = [RECORDER] + ([patch_script(fixes)] if fixes else [])
+        if focus is not None:
+            scripts.append(FOCUS % json.dumps(focus))
         if overlay and self.persona.id in OVERLAYS:
             scripts.append(OVERLAYS[self.persona.id])
         page = self.tmp / f"{out_png.stem}.html"
         page.write_text(prepare_snapshot(html, url, scripts))
+        if focus is not None:  # a headless page never has focus, so :focus would never match
+            try:
+                self.devtools.call("Emulation.setFocusEmulationEnabled", {"enabled": True}, self.devtools.page_sessions[0])
+            except Exception:
+                pass
         self.devtools.navigate(page.as_uri())
         self.devtools.wait_loaded()
-        time.sleep(0.6)  # fixes and overlays run after DOMContentLoaded (+150 ms)
+        time.sleep(0.6)  # fixes, focus and overlays run after DOMContentLoaded (+100-150 ms)
         out_png.write_bytes(self.devtools.screenshot())
-        return out_png
+        try:
+            return json.loads(self.devtools.evaluate("JSON.stringify(window.__auditChanges || [])") or "[]")
+        except Exception:
+            return []
 
     def close(self) -> None:
         try:
@@ -195,13 +312,19 @@ def build_comparisons(records: list[dict], base_dir: str | Path, patch: dict, ou
                     continue
                 html = (base_dir / snap["file"]).read_text()
                 stem = f"{j['kind']}-{j['id']}"
-                renderer.render(html, snap["url"], out_dir / f"{stem}-before.png")
-                renderer.render(html, snap["url"], out_dir / f"{stem}-after.png", fixes=j["fixes_after"])
-                split = crop_to_content(out_dir / f"{stem}-before.png", out_dir / f"{stem}-after.png")
+                before, after = out_dir / f"{stem}-before.png", out_dir / f"{stem}-after.png"
+                focus = focus_selectors(j["fixes_after"])
+                overlay = not (j["kind"] == "fix" and focus is not None)
+                renderer.render(html, snap["url"], before, overlay=overlay, focus=focus)
+                changes = renderer.render(html, snap["url"], after, fixes=j["fixes_after"], overlay=overlay, focus=focus)
+                visible = changed_share(before, after) >= 0.0005  # below that the two images look the same
+                split = crop_to_content(before, after)
                 results.append({"kind": j["kind"], "id": j["id"], "title": j["title"], "wcag": j.get("wcag"),
                                 "persona": persona, "page_url": snap["url"],
-                                "before": f"{stem}-before.png", "after": f"{stem}-after.png",
-                                "split": split if split is not None else 50})
+                                "before": before.name, "after": after.name,
+                                "split": split if split is not None else 50,
+                                "visible": visible, "changes": summarize_changes(changes),
+                                "focused": focus is not None})
         finally:
             renderer.close()
     return results

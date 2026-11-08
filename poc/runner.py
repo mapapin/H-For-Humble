@@ -274,7 +274,9 @@ def wait_terminal(handle, timeout_s: float) -> str | None:
     return status
 
 
-FIRST_STEP_S = 90  # a session that has not made its first step by then never received the browser
+# Healthy sessions make their first step 2-5 s after they start running (measured on 40 sessions). Some never do:
+# H receives our first screenshot, then its agent never acts, and cancelling does not end them. Retry those fast.
+FIRST_STEP_S = 30
 START_GATE_TIMEOUT_S = 40  # the next agent starts at the latest this long after the previous one
 
 
@@ -290,6 +292,24 @@ def wait_with_watchdog(handle, total_s: float, tag: str, stall_s: float = STALL_
     deadline = time.monotonic() + total_s
     started = time.monotonic()
     last_steps, last_progress = None, time.monotonic()
+    # Until the first step, check every 3 s: the clock starts once H runs the session (not while it is queued), and
+    # anything else than "running with 0 steps" (a tool call, an answer, an error) hands over to the normal loop.
+    running_since = None
+    while time.monotonic() < deadline:
+        try:
+            state = handle.status()
+        except httpx.TransportError:
+            time.sleep(3)
+            continue
+        status = str(state.status).split(".")[-1].lower()
+        if (state.steps or 0) > 0 or status not in ("queued", "pending", "running"):
+            break
+        if status == "running":
+            running_since = running_since or time.monotonic()
+            if time.monotonic() - running_since > first_step_s:
+                print(f"[{tag}] STALLED: no first step after {first_step_s:.0f}s.", flush=True)
+                raise TimeoutError(f"session stalled at step 0: no first step after {first_step_s:.0f}s")
+        time.sleep(3)
     while True:
         try:
             return handle.wait_for_completion(timeout_seconds=poll_s)
@@ -304,9 +324,6 @@ def wait_with_watchdog(handle, total_s: float, tag: str, stall_s: float = STALL_
         now = time.monotonic()
         if steps != last_steps:
             last_steps, last_progress = steps, now
-        if not steps and now - started > first_step_s:
-            print(f"[{tag}] STALLED: no first step after {first_step_s:.0f}s.", flush=True)
-            raise TimeoutError(f"session stalled at step 0: no first step after {first_step_s:.0f}s")
         if steps == last_steps and now - last_progress > stall_s:
             print(f"[{tag}] STALLED: no new step for {stall_s:.0f}s at step {steps}. Stop session {handle.id} "
                   "from the H web UI (cancel via API does not work while it waits on the browser).", flush=True)
@@ -716,7 +733,7 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
         agent_started = time.monotonic()
         # A recycled channel that stopped delivering commands is detected sooner, then retried on a fresh one.
         result = wait_with_watchdog(handle, total_s=float(task.get("max_time_s", 600)) + 120, tag=tag,
-                                    first_step_s=45 if record.get("recycled_channel") else FIRST_STEP_S, poll_s=30)
+                                    first_step_s=FIRST_STEP_S, poll_s=30)
         record["agent_duration_s"] = round(time.monotonic() - agent_started, 1)  # excludes waiting for H slots
 
         record["status"] = str(result.status)
