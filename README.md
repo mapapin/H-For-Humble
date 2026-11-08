@@ -68,6 +68,9 @@ Two deliberately inaccessible demo sites are included:
 6. No time to run it? Open the sample reports in [`docs/`](docs/) in a browser: they are real audits exported
    from Humble.
 
+Before a live demo, run `.venv/bin/python scripts/preflight.py`: it checks the app, the demo sites, Chrome, the
+H slots and lists any H session stuck in "running" (stop those in H Agent View).
+
 Each perspective uses 2 H concurrency slots (its browser channel and its agent), so 10 free slots run all five at
 once; with fewer, the remaining agents wait for a slot and start automatically.
 
