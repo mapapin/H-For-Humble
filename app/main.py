@@ -546,7 +546,11 @@ def export_html(audit_id: str, user=Depends(current_user)):
     """A self-contained HTML report (images and replays embedded) that opens anywhere, offline."""
     from export_report import build
     audit = owned_audit(audit_id, user)
-    page = build(audit, store.DATA / "audits" / audit_id)
+    with store.connect() as db:
+        child = db.execute("SELECT scores FROM audits WHERE parent_id=? AND user_id=? AND status='completed' "
+                           "ORDER BY created DESC LIMIT 1", (audit_id, user["id"])).fetchone()
+    after = json.loads(child["scores"]) if child and child["scores"] else None
+    page = build(audit, store.DATA / "audits" / audit_id, after=after)
     return Response(page, media_type="text/html; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="humble-report-{audit_id[:8]}.html"'})
 

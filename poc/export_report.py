@@ -42,7 +42,8 @@ def _dur(s) -> str:
     return f"{int(s // 60)}m {int(s % 60):02d}s" if s >= 60 else f"{round(s)}s"
 
 
-def build(audit: dict, audit_dir: str | Path) -> str:
+def build(audit: dict, audit_dir: str | Path, after: dict | None = None) -> str:
+    """after: the scores of a re-evaluation of this audit with its fixes injected (shown as the verified result)."""
     d, e = Path(audit_dir), html.escape
     scores = audit.get("scores") or {}
     per = scores.get("perspectives") or {}
@@ -109,6 +110,12 @@ def build(audit: dict, audit_dir: str | Path) -> str:
     blocked_names = ", ".join(NAMES.get(k, k) for k in blocked)
     headline = (f"<b>{scores.get('can_complete')} of {scores.get('tested_perspectives')}</b> perspectives completed the journey."
                 + (f" <span class='bad'>Blocked: {e(blocked_names)}.</span>" if blocked else "")) if scores.get("score") is not None else "Not scored."
+    if after and after.get("score") is not None:
+        done = sum(1 for p in (after.get("perspectives") or {}).values() if p.get("completion") == 1)
+        total = len(after.get("perspectives") or {})
+        who = "Devin's" if (audit.get("fixes") or {}).get("source") == "devin" else "the suggested"
+        headline += (f"<br><span class='verified'>Re-tested with {who} fixes injected: <b>{scores.get('score')} → "
+                     f"{after['score']}</b>, {done} of {total} perspectives complete.</span>")
     data = json.dumps(replays).replace("</", "<\\/")
     title = f"Humble report · {audit['name']}"
     return TEMPLATE.replace("{{TITLE}}", e(title)).replace("{{NAME}}", e(audit["name"])).replace("{{URL}}", e(audit["url"])) \
@@ -130,7 +137,7 @@ main{max-width:1180px;margin:auto;padding:36px 22px 60px}h1,h2{font-family:Georg
 .ring{width:140px;height:140px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--c) calc({{PCT}}*1%),#ebe8f1 0);flex-shrink:0}
 .ring div{width:112px;height:112px;border-radius:50%;background:var(--paper);display:flex;flex-direction:column;align-items:center;justify-content:center}
 .ring b{font:400 40px Georgia,serif}.ring small{font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted)}
-.hero p{font:400 26px/1.3 Georgia,serif;margin:0}.hero p b{font-weight:400;color:var(--accent)}.bad{color:var(--poor)}
+.hero p{font:400 26px/1.3 Georgia,serif;margin:0}.verified{display:inline-block;margin-top:10px;font:600 15px/1.4 system-ui,sans-serif;color:#25684a;background:#e3f1e9;padding:6px 12px;border-radius:8px}.hero p b{font-weight:400;color:var(--accent)}.bad{color:var(--poor)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}.tile{background:var(--paper);border:1px solid var(--line);border-radius:14px;overflow:hidden}
 .tile.pass{border-color:#cfe5d8}.tile.fail{border-color:#efd1cd}.tile header{display:flex;justify-content:space-between;align-items:center;padding:12px 14px}
 .tile h3{margin:0;font-size:14px}.tile header small{color:var(--muted);font-size:11px}.grade{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:#fff;font:19px Georgia,serif;background:var(--poor)}
