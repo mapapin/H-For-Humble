@@ -90,8 +90,15 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
     if not config.get("patch"):
         threading.Thread(target=research, daemon=True, name="research").start()
     try:
-        with Client() as client:
-            quota = client.sessions.get_session_quota()
+        quota = None
+        for attempt in range(4):  # a network blip at the start must not fail the whole audit
+            try:
+                with Client() as client:
+                    quota = client.sessions.get_session_quota()
+                break
+            except Exception:
+                if attempt == 3 or stopped.wait(3 * (attempt + 1)):
+                    raise
         if quota.available is not None and quota.available < 1:
             emit("failed", message=f"H has {quota.active}/{quota.limit} slots in use. An agent needs at least 1 free "
                  "slot (2 without a browser channel to recycle). Wait for H to release slots, then try again.")

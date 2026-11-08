@@ -225,3 +225,28 @@ class StartGateTests(unittest.TestCase):
             record = runner.run_one(spec)  # fails after taking the gate, before any session
         self.assertEqual(record["status"], "harness_error")
         self.assertTrue(gate.acquire(blocking=False))  # not leaked
+
+
+class StartupTests(unittest.TestCase):
+    def test_network_blip_at_start_is_retried(self):
+        messages = queue.Queue()
+        calls = {"n": 0}
+
+        def quota(*a, **k):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ConnectionError("dns")
+            return SimpleNamespace(available=10, active=0, limit=10)
+
+        with tempfile.TemporaryDirectory() as folder, patch("hai_agents.Client") as client, patch("runner.Lane"), \
+                patch("runner.run_one", return_value={"status": "completed", "success": True}), \
+                patch("app.jobs.LANE_STAGGER_S", 0), patch("app.jobs.time.sleep"):
+            client.return_value.__enter__.return_value.sessions.get_session_quota.side_effect = quota
+            config = {"url": "https://example.test", "tasks": [{"id": "journey-1", "title": "Read", "goal": "Read the heading."}],
+                      "personas": ["baseline"], "repetitions": 1}
+            stopped = threading.Event()
+            with patch.object(stopped, "wait", return_value=False):
+                audit_worker("test-audit", config, {}, folder, messages, stopped, threading.Event())
+        kinds = [messages.get()["kind"] for _ in range(messages.qsize())]
+        self.assertEqual(kinds[-1], "completed")
+        self.assertGreaterEqual(calls["n"], 2)
