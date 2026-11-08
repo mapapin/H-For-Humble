@@ -229,14 +229,20 @@ class DevinFixer:
             from autofix import needs_fix
             personas = needs_fix(records, rows)
         prompt = self.build_prompt(records, base_dir, site, previous, personas=personas)
-        r = self.http.post(f"{self.base}/sessions", json={
+        body = {
             "prompt": prompt,
             "title": f"Accessibility fixes for {urlparse(site['start_url']).netloc}",
             "tags": ["h-for-humble", "a11y-fix"],
             "structured_output_schema": PATCH_SCHEMA,
             "structured_output_required": True,
             "max_acu_limit": self.max_acu,
-        })
+            "resumable": False,
+        }
+        # devin_mode: "fast" (~2x faster, same intelligence), "ultra" (most capable), "normal"... (DEVIN_MODE)
+        mode = os.environ.get("DEVIN_MODE", "fast")
+        r = self.http.post(f"{self.base}/sessions", json={**body, "devin_mode": mode} if mode else body)
+        if r.status_code in (400, 403, 422) and mode:  # mode not available on this org: use its default
+            r = self.http.post(f"{self.base}/sessions", json=body)
         r.raise_for_status()
         session = r.json()
         sid, url = session["session_id"], session.get("url")
