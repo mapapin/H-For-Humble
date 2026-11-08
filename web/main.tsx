@@ -33,12 +33,12 @@ function Auth({ onLogin }: { onLogin: (user: User) => void }) {
 function App() {
   const [user, setUser] = useState<User | null>(null), [loading, setLoading] = useState(true);
   const [route, setRoute] = useState(location.hash.slice(1) || 'overview');
-  const [audits, setAudits] = useState<Audit[]>([]), [projects, setProjects] = useState<Project[]>([]), [setup, setSetup] = useState<Setup | null>(null);
+  const [audits, setAudits] = useState<Audit[]>([]), [projects, setProjects] = useState<Project[]>([]), [setup, setSetup] = useState<Setup | null>(null), [listed, setListed] = useState(false);
   const [newAudit, setNewAudit] = useState(false), [refreshError, setRefreshError] = useState(''), [query, setQuery] = useState('');
   const [template, setTemplate] = useState<Audit | undefined>(), [startUrl, setStartUrl] = useState(''), [presetUrl, setPresetUrl] = useState('');
   useEffect(() => { api<User>('/auth/me').then(setUser).catch(() => {}).finally(() => setLoading(false)); const changed = () => { setRoute(location.hash.slice(1) || 'overview'); setQuery(''); }; window.addEventListener('hashchange', changed); return () => window.removeEventListener('hashchange', changed); }, []);
   const refresh = React.useCallback(async () => {
-    try { const [a, p, s] = await Promise.all([api<Audit[]>('/audits'), api<Project[]>('/projects'), api<Setup>('/settings')]); setAudits(a); setProjects(p); setSetup(s); setRefreshError(''); }
+    try { const [a, p, s] = await Promise.all([api<Audit[]>('/audits'), api<Project[]>('/projects'), api<Setup>('/settings')]); setAudits(a); setProjects(p); setSetup(s); setRefreshError(''); setListed(true); }
     catch (e) { setRefreshError((e as Error).message); }
   }, []);
   useEffect(() => { if (user) void refresh(); }, [user, refresh, route]);  // keep the list fresh when coming back home
@@ -71,6 +71,7 @@ function App() {
           <section className="home-hero"><div className="home-hero-copy"><div className="eyebrow">SYNTHETIC USERS · REAL BROWSERS · H AGENTS</div><h1>See your site through <em>five different users.</em></h1><p>H computer-use agents run your key journeys in parallel, each with an impairment applied to its browser: low vision, colour blindness, hand tremor, keyboard only. You get a score, replays of where they got stuck, and fixes you can preview and re-test.</p></div>
             <form className="home-start" onSubmit={e => { e.preventDefault(); openNew(undefined, startUrl); }}><label className="sr-only" htmlFor="start-url">Website URL</label><div className="input-icon"><Globe2 size={17} /><input id="start-url" type="url" value={startUrl} onChange={e => setStartUrl(e.target.value)} placeholder="https://your-product.com" required /></div><button className="button primary">Audit this site<ArrowRight size={16} /></button></form>
             <div className="home-personas" aria-hidden="true">{PERSONAS.map(p => <span key={p.id}><PersonaIcon id={p.id} size={14} />{p.name}</span>)}</div></section>
+          {!listed && <div className="loading-panel"><Spinner />Loading your audits…</div>}
           {audits.length > 0 && <section className="section"><div className="section-heading"><div><h2>Your audits <span className="number-pill">{audits.length}</span></h2></div><SearchBox value={query} onChange={setQuery} placeholder="Search by name or website…" /></div><AuditTable audits={filtered} onOpen={id => go(`audit/${id}`)} onNew={() => openNew()} searching={!!query} /></section>}
         </>}
         {page === 'projects' && <><PageHeading eyebrow="PRODUCTS, WITH PERSPECTIVE" title="Your projects" description="Every website you audit becomes part of your workspace." action={() => openNew()} /><div className="project-grid">{projects.map(p => <button className="project-card" key={p.id} onClick={() => go(`project/${p.id}`)}><div className="project-card-top"><span className="site-icon"><Globe2 size={23} /></span><ArrowUpRight size={19} /></div><h2>{p.name}</h2><p>{p.url}</p><div className="project-card-foot"><span>{p.audit_count} audit{p.audit_count !== 1 ? 's' : ''}</span><span>Last explored {date(p.last_audit)}</span></div></button>)}</div>{!projects.length && <Empty icon={Folder} title="Your next perspective starts here." text="Run an audit on a website to create its project and start building a history." action={() => openNew()} actionText="Create your first audit" />}</>}

@@ -81,6 +81,7 @@ export function ReplayDialog({ audit, run, close, others = [], open }: { audit: 
               <div className="timeline-ticks" aria-hidden="true">{steps.map((s, i) => <span key={i} className={`tick ${s.effects?.blocked ? 'blocked' : s.effects?.jitter ? 'jitter' : s.action?.kind || ''} ${i <= index ? 'past' : ''}`} />)}</div>
             </div>
             <button className="speed-button" aria-label={`Playback speed ${speed}x`} onClick={() => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length])}>{speed}×</button>
+            <span className="replay-keys" aria-hidden="true"><kbd>Space</kbd> play · <kbd>←</kbd><kbd>→</kbd> step</span>
           </div>
         </div>
         <aside className="replay-side">
