@@ -220,7 +220,7 @@ export function StuckSessions({ audit }: { audit: Audit }) {
   if (!stuck.length || !terminal(audit.status)) return null;
   return <div className="stuck-note" role="status"><AlertOctagon size={18} /><div>
     <strong>{stuck.length} H session{stuck.length > 1 ? 's' : ''} did not end cleanly</strong>
-    <p>H never started {stuck.length > 1 ? 'them' : 'it'} or never confirmed the end, so {stuck.length > 1 ? 'they keep' : 'it keeps'} holding H concurrency slots. Stop {stuck.length > 1 ? 'each one' : 'it'} in H Agent View to free the slots for the next audit.</p>
+    <p>H never started {stuck.length > 1 ? 'them' : 'it'} or never confirmed the end (Humble retried on a fresh browser). If {stuck.length > 1 ? 'one still shows' : 'it still shows'} as running in H Agent View, stop it there: it holds an H concurrency slot.</p>
     <div className="stuck-links">{stuck.map(r => <a key={r.key} className="button secondary" href={r.url} target="_blank" rel="noreferrer">{pname(r.persona)}<ArrowUpRight size={13} /></a>)}</div>
   </div></div>;
 }
