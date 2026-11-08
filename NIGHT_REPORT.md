@@ -47,9 +47,15 @@ To try it: `git checkout humble-v2 && npm install && npm run build && npm start`
 Workarounds are in place (see Reliability), but a fully parallel live demo depends on (1) being fixed. Plan B:
 show finished audits and replays (the report is fully usable offline).
 
-## Results
+## Results (real H runs)
 
-(see below, filled in as audits finished)
+| Audit | Outcome |
+|---|---|
+| Mugs & Co, 5 agents in parallel (00:16) | 5/5 runs done in ~5 min. Score **39/F**: baseline and tremor complete; colour blind buys the backorder mug, keyboard-only can't reach checkout, low vision can't find checkout at 200% (29 steps). axe-core flags **1** rule (contrast). Sample: `docs/sample-report-demo-shop.html`, montage `docs/montage-demo-shop.mp4`. |
+| Mugs & Co re-evaluation with fixes (yesterday) | **40 → 100**: every perspective completes with the fixes injected. |
+| Mugs & Co "Fix until it passes" (yesterday) | **33 → 100** in 2 rounds. |
+| mousquetaires.com (real site, 00:30) | Score **79/B** on 4 perspectives (keyboard-only didn't get a slot): all complete, but **low vision needed 4.7× the steps** (33 vs 7, score 36). Linkup: *partially compliant with RGAA 4.1.2 (69%), self-assessed*, known issues include keyboard traps in the mega-menu. axe: 5 rules. Sample: `docs/sample-report-mousquetaires.html`. |
+| Lune (new site) | Runs that H started work as designed: baseline books Thu 10 Dec for €98.00 in 7 steps; low vision blocked (33 steps); keyboard-only blocked (25 steps, cannot select a date); colour blind picks a sold-out date, only discovers it at checkout ("waitlist"), then books a later date (now counted as a failure: the expected answer checks the total *and* the first open date). No complete 5/5 Lune audit yet because of the H stalls below. axe on Lune: 4 rules (48 contrast nodes), none for the blockers the agents hit. |
 
 ## Not done / next
 
