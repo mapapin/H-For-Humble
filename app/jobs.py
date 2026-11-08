@@ -167,10 +167,13 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
                              if dead_recycled else "H did not start this session (no first step)" if record.get("stalled")
                              else "Technical error") + ", retrying once with a fresh browser channel.")
                         previous = record.get("session_id")
+                        stuck_before = [previous] if previous and record.get("session_closed") is False else []
                         # (a retry does not wait long for a slot: stuck sessions on H may never free theirs)
                         record = run_one({**spec, "retry": 1, "no_recycle": True, "slot_timeout_s": 240}, lane=lane,
                                          on_event=on_event, stop_event=halt)
                         record["retry_of"] = previous
+                        if stuck_before:
+                            record["stuck_session_ids"] = stuck_before
                     # Never persist third-party exception text: it can contain request headers or credentials.
                     for key in SANITIZED_KEYS:
                         if record.get(key):
