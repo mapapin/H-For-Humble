@@ -594,7 +594,8 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
                 channel_id = lane.channel_id if reuse else spec.get("channel_id")  # None = new channel
                 if channel_id is None and not reuse:
                     channel_id = acquire_channel(client, tag, stop_event=stop_event, on_wait=on_wait, lock=lock,
-                                                 recycle=not spec.get("no_recycle"))
+                                                 recycle=not spec.get("no_recycle"),
+                                                 timeout_s=float(spec.get("slot_timeout_s", 2400)))
                     record["recycled_channel"] = channel_id is not None
                 else:
                     # a new channel and the agent session each take a slot; a pending channel already holds its own
