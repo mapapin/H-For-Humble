@@ -55,13 +55,43 @@ class WorkerTests(unittest.TestCase):
     def test_fresh_channels_are_the_default(self):
         self.assertFalse(Lane(0, 9400).reuse_channel)
 
-    @patch("runner.time.monotonic", side_effect=[0, 0, 1, 2, 200])
-    def test_watchdog_detects_no_progress(self, clock):
+    @staticmethod
+    def clock(step=5.0):
+        t = {"now": 0.0}
+
+        def tick():
+            t["now"] += step
+            return t["now"]
+        return tick
+
+    @patch("runner.time.sleep")
+    def test_watchdog_detects_no_progress(self, sleep):
         handle = MagicMock()
         handle.wait_for_completion.side_effect = TimeoutError()
-        handle.status.return_value = SimpleNamespace(steps=0)
-        with self.assertRaisesRegex(TimeoutError, "session stalled"):
+        handle.status.return_value = SimpleNamespace(status="running", steps=3)
+        with patch("runner.time.monotonic", side_effect=self.clock()), \
+                self.assertRaisesRegex(TimeoutError, "no progress for 180s"):
             wait_with_watchdog(handle, total_s=600, tag="test", stall_s=180)
+
+    @patch("runner.time.sleep")
+    def test_watchdog_retries_a_session_that_never_makes_its_first_step_within_30s(self, sleep):
+        handle = MagicMock()
+        states = [SimpleNamespace(status="queued", steps=0)] * 10 + [SimpleNamespace(status="running", steps=0)] * 20
+        handle.status.side_effect = states
+        with patch("runner.time.monotonic", side_effect=self.clock()), \
+                self.assertRaisesRegex(TimeoutError, "stalled at step 0"):
+            wait_with_watchdog(handle, total_s=600, tag="test")
+        # 10 checks while queued do not count; then about 30 s of running (every check is 5 s on this clock)
+        self.assertLess(handle.status.call_count, 20)
+        handle.wait_for_completion.assert_not_called()
+
+    @patch("runner.time.sleep")
+    def test_watchdog_hands_over_after_the_first_step(self, sleep):
+        handle = MagicMock()
+        handle.status.side_effect = [SimpleNamespace(status="running", steps=0), SimpleNamespace(status="running", steps=1)]
+        handle.wait_for_completion.return_value = "done"
+        with patch("runner.time.monotonic", side_effect=self.clock()):
+            self.assertEqual(wait_with_watchdog(handle, total_s=600, tag="test"), "done")
 
     def test_worker_retries_stall_only_once_after_session_closed(self):
         messages = queue.Queue()

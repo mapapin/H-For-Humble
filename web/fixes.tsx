@@ -63,7 +63,7 @@ function PersonaComparisons({ comparisons, base }: { comparisons: Comparison[]; 
   const c = comparisons[Math.min(current, comparisons.length - 1)];
   return <section className="section"><div className="section-heading"><div><h2>Before and after, through their eyes</h2><p>All fixes applied, on the page where each perspective got stuck, rendered as that user sees it. Drag the divider.</p></div></div>
     <div className="compare-tabs" role="tablist" aria-label="Perspective">{comparisons.map((x, i) => <button key={x.id} role="tab" aria-selected={i === current} className={i === current ? 'selected' : ''} onClick={() => setCurrent(i)}><PersonaIcon id={x.persona} size={13} />{pname(x.persona)}</button>)}</div>
-    <figure className="compare-feature" key={c.id}><CompareSlider before={base + c.before} after={base + c.after} label={pname(c.persona)} split={c.split} /><figcaption>{c.page_url.replace(/^https?:\/\//, '')} · as seen by the {pname(c.persona).toLowerCase()} perspective</figcaption></figure></section>;
+    <figure className="compare-feature" key={c.id}>{c.visible === false ? <FixVisual c={c} base={base} label={pname(c.persona)} /> : <CompareSlider before={base + c.before} after={base + c.after} label={pname(c.persona)} split={c.split} />}<figcaption>{c.page_url.replace(/^https?:\/\//, '')} · as seen by the {pname(c.persona).toLowerCase()} perspective</figcaption></figure></section>;
 }
 
 function FixCard({ fix, comparison, base }: { fix: Fix; comparison?: Comparison; base: string }) {
@@ -72,7 +72,21 @@ function FixCard({ fix, comparison, base }: { fix: Fix; comparison?: Comparison;
     <p className="fix-who">{fix.personas.map(p => <span key={p}><PersonaIcon id={p} size={12} />{pname(p)}</span>)}<small>{fix.page_url.replace(/^https?:\/\//, '')}</small></p>
     <p>{fix.description}</p>
     <details><summary><Wrench size={13} />Code change for developers</summary><p>{fix.code_change}</p>{(fix.css || fix.js) && <pre>{[fix.css, fix.js].filter(Boolean).join('\n\n')}</pre>}</details>
-  </div>{comparison?.before ? <CompareSlider before={base + comparison.before} after={base + comparison.after!} label={fix.title} split={comparison.split} /> : <div className="quiet-note">No snapshot of this page in the audit.</div>}</article>;
+  </div>{comparison?.before ? <FixVisual c={comparison} base={base} label={fix.title} /> : <div className="quiet-note">No snapshot of this page in the audit.</div>}</article>;
+}
+
+/** The slider when the fix shows on screen; otherwise one image and a plain explanation. Below: what the fix changes
+ * in the page (roles, names, tab stops), recorded while it was applied. */
+function FixVisual({ c, base, label }: { c: Comparison; base: string; label: string }) {
+  const invisible = c.visible === false;
+  return <div className="fix-visual">
+    {invisible ? <figure className="compare-static"><img src={base + c.after} alt={`The page with the fix: ${label}`} /><figcaption>{c.changes?.length
+      ? 'Nothing changes on screen: this fix changes what keyboard and screen reader users get.'
+      : 'Nothing changes on this copy of the page: the fix acts once the user interacts with it (for example after choosing an option).'}</figcaption></figure>
+      : <CompareSlider before={base + c.before} after={base + c.after!} label={label} split={c.split} />}
+    {c.focused && !invisible && <p className="fix-visual-note">An element is focused in both images, as if reached with Tab.</p>}
+    {!!c.changes?.length && <div className="fix-changes"><strong>In the page</strong><ul>{c.changes.map(x => <li key={x}><code>{x}</code></li>)}</ul></div>}
+  </div>;
 }
 
 function BeforeAfterScores({ parent, audit, onOpen }: { parent: NonNullable<Audit['parent']>; audit: Audit; onOpen: (id: string) => void }) {
