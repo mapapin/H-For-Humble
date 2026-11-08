@@ -68,6 +68,21 @@ show finished audits and replays (the report is fully usable offline).
 | Lune re-evaluation with fixes (05:03) | **34 → 74**: baseline (6 steps), low vision (10), colour blind (6) and tremor (8) all complete. Keyboard-only still blocked: it selected the date by keyboard, but could not tell whether focus was on '−' or '+' (14 px buttons touching). I extended the keyboard fix with unambiguous stepper focus (verified with real key events). |
 | Lune (earlier runs) | Runs that H started work as designed: baseline books Thu 10 Dec for €98.00 in 7 steps; low vision blocked (33 steps); keyboard-only blocked (25 steps, cannot select a date); colour blind picks a sold-out date, only discovers it at checkout ("waitlist"), then books a later date (now counted as a failure: the expected answer checks the total *and* the first open date). No complete 5/5 Lune audit yet because of the H stalls below. axe on Lune: 4 rules (48 contrast nodes), none for the blockers the agents hit. |
 
+## What to open for the demo (local test account)
+
+| Audit | Why |
+|---|---|
+| `c7a4f0ce` Lune · book a pottery workshop (49/D) | The main report: verdict, live grid tiles, replays, barriers, axe vs agents, Fixes tab with sliders |
+| `25311be4` … · with fixes (85/B) | Re-evaluation: before/after rings, every perspective completes |
+| `03e49fa7` Lune · fix until it passes (37 → 84) | Auto mode in one audit, rounds view |
+| `22beea7b` Mousquetaires (58/D) | Real site: Linkup declared vs measured, keyboard blocked by the hover-only menu |
+| `0c1171eb` Mugs & Co (39/F) | Axe flags 1 rule vs 3 perspectives blocked |
+
+Open them at `http://127.0.0.1:8000/#audit/<full id>` (the home list shows them first). Candidates to delete (new
+trash icon on a finished report, H-stall experiments): `95f04682`, `445f4316`, `4179b8af`, `f231a977`, `15db7bb5`,
+`cd748705` (old calendar layout), `2739939f` (superseded by `22beea7b`), `a7d13564` (auto-mode experiment on the real
+site, honest but confusing in a demo).
+
 ## Not done / next
 
 - Devin: no Devin API key in `~/Documents/h_company`, so `DevinFixer` is still untested (the UI and pipeline
