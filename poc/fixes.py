@@ -167,10 +167,11 @@ class DevinFixer:
     source = "devin"
 
     def __init__(self, api_key: str | None = None, org_id: str | None = None, max_acu: int = 10,
-                 timeout_s: float = 1800, base_url: str = "https://api.devin.ai/v3") -> None:
+                 timeout_s: float = 1800, base_url: str = "https://api.devin.ai/v3", mode: str | None = None) -> None:
         self.api_key = api_key or os.environ["DEVIN_API_KEY"]
         self.org_id = org_id or os.environ["DEVIN_ORG_ID"]
         self.max_acu, self.timeout_s = max_acu, timeout_s
+        self.mode = mode if mode is not None else os.environ.get("DEVIN_MODE", "fast")
         self.base = f"{base_url}/organizations/{self.org_id}"
         self.http = httpx.Client(headers={"Authorization": f"Bearer {self.api_key}"}, timeout=60)
 
@@ -239,7 +240,7 @@ class DevinFixer:
             "resumable": False,
         }
         # devin_mode: "fast" (~2x faster, same intelligence), "ultra" (most capable), "normal"... (DEVIN_MODE)
-        mode = os.environ.get("DEVIN_MODE", "fast")
+        mode = self.mode
         r = self.http.post(f"{self.base}/sessions", json={**body, "devin_mode": mode} if mode else body)
         if r.status_code in (400, 403, 422) and mode:  # mode not available on this org: use its default
             r = self.http.post(f"{self.base}/sessions", json=body)
