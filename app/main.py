@@ -28,12 +28,13 @@ from audit import load_dotenv
 from personas import PERSONAS
 
 load_dotenv(store.ROOT / ".env")
-from .jobs import manager
+from .jobs import manager, recover_saved_runs
 
 
 @asynccontextmanager
 async def lifespan(app):
     store.init()
+    recover_saved_runs()
     with store.connect() as db:
         db.execute("UPDATE audits SET status='failed', error='The server restarted during this audit. Check H Agent View for any remaining session before retrying.', finished=? WHERE status IN ('running','paused','stopping','queued')", (time.time(),))
         # Audits from before product scores existed: score them from their saved runs.

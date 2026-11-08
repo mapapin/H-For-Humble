@@ -3,14 +3,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
 from app import store
 from app.main import app, login_attempts
-from fixes import CannedFixer, merge_patches, patch_script
+from fixes import CannedFixer, DevinFixer, FallbackFixer, merge_patches, patch_script
 from render import crop_to_content
 
 DEMO = Path(__file__).resolve().parents[1] / "poc" / "fixes" / "demo_shop.json"
@@ -22,6 +22,33 @@ def rows(**rates):
 
 
 class FixTests(unittest.TestCase):
+    def test_devin_publishes_session_before_waiting_for_output(self):
+        fixer = DevinFixer(api_key="test", org_id="test")
+        self.addCleanup(fixer.http.close)
+        fixer.build_prompt = Mock(return_value="test")
+        fixer.on_progress = Mock()
+        created = Mock()
+        created.status_code = 200
+        created.json.return_value = {"session_id": "test-session", "url": "https://app.devin.ai/sessions/test"}
+        finished = Mock()
+        finished.json.return_value = {"status": "exit", "status_detail": "finished", "structured_output": {"fixes": []}}
+        with patch.object(fixer.http, "post", return_value=created), patch.object(fixer.http, "get", return_value=finished), patch("fixes.time.sleep") as sleep:
+            sleep.side_effect = lambda _: self.assertEqual(fixer.on_progress.call_args.kwargs["devin_session_url"], "https://app.devin.ai/sessions/test")
+            result = fixer.generate([], [], "/unused", SITE, personas=[])
+        self.assertEqual(result["source"], "devin")
+        self.assertEqual(fixer.on_progress.call_args.kwargs["devin_status"], "finished")
+
+    def test_fallback_announces_local_provider(self):
+        primary = Mock(source="devin")
+        primary.generate.side_effect = RuntimeError("unavailable")
+        fallback = Mock(source="rules")
+        fallback.generate.return_value = {"source": "rules", "fixes": []}
+        fixer = FallbackFixer(primary, fallback)
+        fixer.on_progress = Mock()
+        result = fixer.generate([], [], "/unused", SITE)
+        self.assertEqual(result["fallback_reason"], "RuntimeError")
+        self.assertEqual(fixer.on_progress.call_args.kwargs["fix_provider"], "local")
+
     def test_patch_script_scopes_fixes_to_their_page(self):
         script = patch_script([{"id": "x", "page_url": "http://site.test/cart", "css": ".a{color:red}", "js": "window.ran = 1;"}])
         self.assertIn('path: "/cart"', script)

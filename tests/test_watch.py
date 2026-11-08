@@ -1,5 +1,6 @@
 """The job watcher turns worker messages into the audit row the UI polls: lanes, results, scores, events."""
 import queue
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app import store
-from app.jobs import JobManager
+from app.jobs import JobManager, checkpoint_run, recover_saved_runs
 
 
 class Messages:
@@ -68,6 +69,31 @@ class WatchTests(unittest.TestCase):
         self.assertEqual(a["scores"]["perspectives"]["baseline"]["score"], 100)
         self.assertEqual(a["scores"]["perspectives"]["keyboard_only"]["score"], 0)
         self.assertEqual(sum("Waiting for a free H slot" in e for e in events), 1)  # logged once per lane
+
+    def test_run_is_visible_without_queue_delivery_and_duplicate_is_idempotent(self):
+        result = record("baseline", True)
+        result["report"]["answer"] = "8 December; 98.00"
+        checkpoint_run("a", result)
+        checkpoint_run("a", result)
+        with store.connect() as db:
+            saved = store.serialize(db.execute("SELECT * FROM audits WHERE id='a'").fetchone())
+        self.assertEqual(len(saved["results"]), 1)
+        self.assertEqual(saved["results"][0]["report"]["answer"], "8 December; 98.00")
+        self.assertEqual(saved["progress"]["completed"], 1)
+
+    def test_restart_recovers_reports_and_keeps_existing_metadata(self):
+        directory = store.DATA / "audits" / "a"
+        directory.mkdir(parents=True)
+        result = record("baseline", True)
+        (directory / (result["tag"] + ".json")).write_text(json.dumps(result))
+        recover_saved_runs()
+        checkpoint_run("a", {**result, "assisted": True})
+        recover_saved_runs()
+        with store.connect() as db:
+            saved = store.serialize(db.execute("SELECT * FROM audits WHERE id='a'").fetchone())
+        self.assertEqual(len(saved["results"]), 1)
+        self.assertTrue(saved["results"][0]["assisted"])
+        self.assertEqual(saved["scores"]["perspectives"]["baseline"]["score"], 100)
 
 
 if __name__ == "__main__":

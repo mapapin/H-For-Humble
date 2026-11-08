@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import json
 import os
 import queue
 import sys
@@ -22,6 +23,54 @@ MAX_LANES = int(os.environ.get("HUMBLE_MAX_LANES", "5"))
 BASE_PORT = 9400
 LANE_STAGGER_S = 1.5  # between browser startups
 SANITIZED_KEYS = ("error", "status_error", "screenshot_error", "snapshot_error", "cleanup_error")
+
+
+def checkpoint_run(audit_id, record):
+    """Publish a finished run independently of the process event queue."""
+    with store.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT results,progress,config FROM audits WHERE id=?", (audit_id,)).fetchone()
+        if row is None:
+            return
+        records, progress, config = (json.loads(row[k]) for k in ("results", "progress", "config"))
+        rnd = record.get("round", 0)
+        if records and max(r.get("round", 0) for r in records) > rnd:
+            return
+        records = [r for r in records if r.get("round", 0) == rnd and
+                   (r.get("task"), r.get("persona"), r.get("run")) !=
+                   (record.get("task"), record.get("persona"), record.get("run"))]
+        records.append(record)
+        progress["completed"] = len(records)
+        if record.get("lane") is not None:
+            lane = progress.setdefault("lanes", {}).setdefault(str(record["lane"]), {})
+            lane.update(state="finished", tag=record.get("tag"), success=bool(record.get("success")),
+                        error=record.get("status") == "harness_error", steps=record.get("steps"),
+                        finished_at=time.time())
+        db.execute("UPDATE audits SET results=?,summary=?,scores=?,progress=? WHERE id=?",
+                   (json.dumps(records), json.dumps(summarize(records)),
+                    json.dumps(scorecard(records, config.get("personas"))), json.dumps(progress), audit_id))
+
+
+def recover_saved_runs():
+    """Restore final reports left on disk if event delivery or the server stopped."""
+    with store.connect() as db:
+        audits = db.execute("SELECT id,results FROM audits").fetchall()
+    for audit in audits:
+        existing = {r.get("tag") for r in json.loads(audit["results"])}
+        directory = store.DATA / "audits" / audit["id"]
+        for path in sorted(directory.glob("*__*.json"), key=lambda p: p.stat().st_mtime):
+            try:
+                record = json.loads(path.read_text())
+                if not all(k in record for k in ("task", "persona", "run", "tag", "success")):
+                    continue
+                if record["tag"] in existing:
+                    continue
+                # Older runner reports encode the round in their filename.
+                record.setdefault("round", next((int(part[1:]) for part in record["tag"].split("__")
+                                                   if part.startswith("r") and part[1:].isdigit()), 0))
+                checkpoint_run(audit["id"], record)
+            except (ValueError, OSError):
+                continue
 
 
 class AnyEvent:
@@ -110,12 +159,23 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
         max_rounds = int(config.get("max_rounds", 2)) if auto else 0
         patch = config.get("patch")
         fixer = make_fixer("auto")  # Devin when DEVIN_API_KEY/DEVIN_ORG_ID are set, else rules + demo stand-in
+        def fix_progress(**details):
+            emit("progress", phase="fixes", **details)
+        fixer.on_progress = fix_progress
+        if hasattr(fixer, "primary"):
+            fixer.primary.on_progress = fix_progress
+
+        def start_fixes():
+            fix_progress(fix_status="starting", fix_provider=fixer.source,
+                         fix_started_at=time.time(), devin_session_url=None,
+                         message="Starting Devin…" if fixer.source == "devin" else "Preparing local fix suggestions…")
         state = {"completed": 0, "failed_cases": 0}
         first_round, round_records, rows = None, [], []
         personas, tasks, reps = config["personas"], config["tasks"], config["repetitions"]
         order = {(t["id"], p, r): i for i, (r, t, p) in enumerate((r, t, p) for r in range(reps) for t in tasks for p in personas)}
         wanted_lanes = int(config.get("parallel") or MAX_LANES)
         for rnd in range(max_rounds + 1):
+            emit("progress", phase="testing", fix_status=None)
             script = patch_script(patch["fixes"]) if patch and patch.get("fixes") else None
             if rnd:
                 emit("round_started", round=rnd, message=f"Round {rnd + 1}: re-evaluating every perspective with "
@@ -187,6 +247,7 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
                             record[key] = "The browser or H session encountered a technical error. Check the local server terminal."
                     record.update(round=rnd, lane=idx)
                     with lock:
+                        checkpoint_run(audit_id, record)
                         round_records.append(record)
                         state["completed"] += 1
                         if record.get("status") == "harness_error" and not halt.is_set():
@@ -230,6 +291,7 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
                 break
             emit("progress", phase="fixes", message="Some perspectives still fail. Asking "
                  + ("Devin" if getattr(fixer, "source", "") == "devin" else "the fixer") + " for fixes.")
+            start_fixes()
             new = fixer.generate(round_records, rows, out_dir, site, patch)
             if not new["fixes"]:
                 entry["stopped"] = "No new fix to suggest."
@@ -243,7 +305,7 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
         try:
             fix_dir = Path(out_dir) / "fixes"
             if auto and patch and patch.get("fixes"):
-                emit("progress", message="Rendering before/after images of the applied fixes.")
+                fix_progress(fix_status="rendering", message="Preparing before/after previews of the applied fixes.")
                 comparisons = build_comparisons(first_round, out_dir, patch, fix_dir, headers=credentials.get("headers"))
                 emit("fixes", fixes={"source": fixer.source, "patch": patch, "comparisons": comparisons,
                                      "new_fix_ids": [f["id"] for f in patch["fixes"]], "created": time.time()})
@@ -252,11 +314,13 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
                 emit("progress", phase="fixes", message=("Devin is writing fixes for the perspectives that struggled "
                      "(a few minutes); the results above are final." if getattr(fixer, "source", "") == "devin" else
                      "Writing fix suggestions and rendering before/after images."))
+                start_fixes()
                 sug = suggest_fixes(round_records, rows, out_dir, site, fixer, previous=config.get("patch"),
                                     out_dir=fix_dir)
                 emit("fixes", fixes=sug)
+            fix_progress(fix_status="done", message="Fix preparation finished.")
         except Exception as exc:
-            emit("progress", message=f"Fix suggestions are unavailable ({type(exc).__name__}). The audit results are complete.")
+            fix_progress(fix_status="error", message=f"Fix suggestions are unavailable ({type(exc).__name__}). The audit results are complete.")
         emit("completed")
     except Exception as exc:
         traceback.print_exc()
@@ -381,14 +445,12 @@ class JobManager:
                     r = item["record"]
                     if r.get("session_id") in self.assisted:
                         r["assisted"] = True
-                    records.append(r)
-                    progress["completed"] = item["completed"]
                     if lane is not None:
-                        lanes[str(lane)] = {**lanes.get(str(lane), {}), "state": "finished", "tag": r.get("tag"),
-                                            "success": bool(r.get("success")), "error": r.get("status") == "harness_error",
-                                            "steps": r.get("steps"), "finished_at": time.time()}
-                    store.update(audit_id, results=records, summary=summarize(records),
-                                 scores=scorecard(records, personas), progress=progress)
+                        r["lane"] = lane
+                    checkpoint_run(audit_id, r)
+                    with store.connect() as db:
+                        saved = db.execute("SELECT results,progress FROM audits WHERE id=?", (audit_id,)).fetchone()
+                    records, progress = json.loads(saved["results"]), json.loads(saved["progress"])
                     store.event(audit_id, kind, f"{label(r.get('persona'))}: "
                                 + ("technical error" if r.get("status") == "harness_error" else
                                    "journey completed" if r.get("success") else "journey not completed"))
@@ -405,6 +467,10 @@ class JobManager:
             if not terminal:
                 store.update(audit_id, status="failed", finished=time.time(),
                              error="The audit process exited unexpectedly. Check the local server terminal.")
+        except Exception:
+            traceback.print_exc()
+            store.update(audit_id, status="failed", finished=time.time(),
+                         error="The live result feed stopped unexpectedly. Saved run reports remain available.")
         finally:
             process.join(timeout=2)
             messages.close()
