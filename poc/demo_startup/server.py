@@ -380,19 +380,21 @@ actually leave with something you're proud of.”</blockquote><div class="who">M
 
 
 def date_strip(w: dict, selected: int | None) -> str:
-    cols = []
+    """A month calendar: weekday header, then one cell per day (the first one placed on its weekday column)."""
+    cols = [f'<span class="dow dow-head">{c}</span>' for c in "MTWTFSS"]
     for day in range(1, 32):
         d = dt.date(YEAR, MONTH, day)
         status = day_status(w, day)
         end = " week-end" if d.weekday() == 6 else ""
-        dow = f'<span class="dow">{"MTWTFSS"[d.weekday()]}</span>'
+        start = f' style="grid-column-start:{d.weekday() + 1}"' if day == 1 else ""
+        dow = ""
         if status == "closed":
             chip = f'<span class="day is-closed">{day}</span>'
         else:
             sel = " is-selected" if day == selected else ""
             chip = (f'<div class="day is-{status}{sel}" data-date="{YEAR}-{MONTH:02d}-{day:02d}" '
                     f'data-label="{html.escape(short_label(w, day))}" onclick="pickDate(this)">{day}</div>')
-        cols.append(f'<div class="day-col{end}">{dow}{chip}</div>')
+        cols.append(f'<div class="day-col{end}"{start}>{dow}{chip}</div>')
     return "".join(cols)
 
 

@@ -39,7 +39,7 @@ setTimeout(function () {
     document.body.appendChild(b);
   }
   document.querySelectorAll(focusable).forEach(function (el) {
-    if (!el.getClientRects().length) return;
+    if (!el.getClientRects().length || el.tabIndex < 0) return;  // tabindex=-1: reached with arrow keys, not Tab
     n += 1;
     el.style.outline = '3px solid #12a150';
     badge(el, 'Tab ' + n, '#12a150');
