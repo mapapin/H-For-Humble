@@ -25,7 +25,7 @@ November 2026.
 | **Replays** | Every run is rebuilt from H's session history: the screenshot the agent decided on, its thought, its action, the click target and where a tremor click actually landed, blocked mouse actions, key presses. Plays like a video. |
 | **Static checker vs real journeys** | axe-core runs on every page the agents visited. On our demo shop it flags 1 rule; the agents find 3 perspectives that cannot check out, 2 of which no rule detects. |
 | **Linkup research** | Suggests the journeys visitors come for on any public site, and reads the site's own accessibility statement (e.g. mousquetaires.com: *partially compliant with RGAA 4.1.2, 69% of criteria met, self-assessed*, with its known keyboard issues) to show **declared vs measured**. |
-| **Fixes, before/after, re-test** | One fix per barrier (WCAG criterion, preview CSS/JS, the real code change). A large before/after slider renders the page as the blocked user sees it. **Evaluate again with fixes** re-runs every agent with the fixes injected; **Fix until it passes** loops audit → fix → audit automatically. Fixes come from Devin (API) when configured, hand-written fixes for the demo sites, or Humble's rule engine for any site. |
+| **Fixes by Devin, before/after, re-test** | Devin writes one fix per barrier (WCAG criterion, preview CSS/JS, the real code change). A large before/after slider renders the page as the blocked user sees it. **Evaluate again with fixes** re-runs every agent with the fixes injected; **Fix until it passes** loops audit → fix → audit automatically. Fixes come from Devin (API) when configured, hand-written fixes for the demo sites, or Humble's rule engine for any site. |
 | **Shareable report** | One self-contained HTML file per audit (screenshots, replays, before/after embedded) that opens anywhere, offline. |
 
 ## Quick start
@@ -123,9 +123,10 @@ Tested end to end with real H sessions (5 agents in parallel on Lune, Mugs & Co 
   (`/v1/fetch` of its accessibility statement).
 - **Devin** writes the fixes (`DevinFixer`, API v3 with structured output, `devin_mode: fast` by default): it gets
   the journey, what each struggling perspective reported and the pages they saw, and returns one previewable fix per
-  barrier plus the real code change. A second round gets what still fails after the first fixes. On Lune, Devin's
-  first 6 fixes took the score from 49 to 74 (low vision and colour blind unblocked) in about 5 minutes. If Devin is
-  not configured or fails, hand-written fixes (demo sites) and the rule engine (any site) are used.
+  barrier plus the real code change. A second round gets what still fails after the first fixes. Re-tested by the
+  agents: Lune **49 → 74 → 86** in two rounds, every perspective completes; on the real mousquetaires.com,
+  **58 → 79**, keyboard-only and low vision unblocked. If Devin is not configured or fails, hand-written fixes
+  (demo sites) and the rule engine (any site) are used.
 - **axe-core** (open source) for the static comparison.
 
 ## Privacy and interpretation
