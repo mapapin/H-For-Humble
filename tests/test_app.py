@@ -191,5 +191,23 @@ def test_steer_requires_a_running_agent_and_marks_the_session(self):
 AppTests.test_steer_requires_a_running_agent_and_marks_the_session = test_steer_requires_a_running_agent_and_marks_the_session
 
 
+
+def test_delete_finished_audit_only(self):
+    self.register()
+    audit = self.create_audit()
+    store.update(audit["id"], status="running")
+    self.assertEqual(self.client.delete(f"/api/audits/{audit['id']}").status_code, 409)
+    store.update(audit["id"], status="completed")
+    folder = store.DATA / "audits" / audit["id"]
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "x.png").write_bytes(b"x")
+    self.assertEqual(self.client.delete(f"/api/audits/{audit['id']}").status_code, 200)
+    self.assertEqual(self.client.get(f"/api/audits/{audit['id']}").status_code, 404)
+    self.assertFalse(folder.exists())
+
+
+AppTests.test_delete_finished_audit_only = test_delete_finished_audit_only
+
+
 if __name__ == "__main__":
     unittest.main()

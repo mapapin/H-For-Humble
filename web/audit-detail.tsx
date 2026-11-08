@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowDownToLine, ArrowLeft, ArrowUpRight, Clock3, LockKeyhole, Pause, Play, RotateCcw, Sparkles, Square } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, ArrowUpRight, Clock3, LockKeyhole, Pause, Play, RotateCcw, Sparkles, Square, Trash2 } from 'lucide-react';
 import { api, date, Dialog, ErrorNote, host, pname, Spinner, Status, terminal, total } from './shared';
 import type { Audit, Run } from './shared';
 import { FixesPanel } from './fixes';
@@ -12,7 +12,8 @@ type Tab = typeof TABS[number];
 export function AuditDetail({ id, onBack, onRerun, onUpdate, onOpen = next => { location.hash = `audit/${next}`; } }: { id: string; onBack: () => void; onRerun: (a: Audit) => void; onUpdate: () => Promise<void>; onOpen?: (id: string) => void }) {
   const [audit, setAudit] = useState<Audit | null>(null), [error, setError] = useState('');
   const [busy, setBusy] = useState(false), [tab, setTab] = useState<Tab>('report'), [connected, setConnected] = useState(true);
-  const [replay, setReplay] = useState<Run | null>(null), [stopConfirm, setStopConfirm] = useState(false);
+  const [replay, setReplay] = useState<Run | null>(null), [stopConfirm, setStopConfirm] = useState(false), [deleteConfirm, setDeleteConfirm] = useState(false);
+  const closeDelete = React.useCallback(() => setDeleteConfirm(false), []);
   const closeReplay = React.useCallback(() => setReplay(null), []);
   const closeConfirm = React.useCallback(() => setStopConfirm(false), []);
   useEffect(() => {
@@ -36,6 +37,12 @@ export function AuditDetail({ id, onBack, onRerun, onUpdate, onOpen = next => { 
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }
+  async function remove() {
+    setBusy(true); setError('');
+    try { await api(`/audits/${id}`, { method: 'DELETE' }); await onUpdate(); onBack(); }
+    catch (e) { setError((e as Error).message); setDeleteConfirm(false); }
+    finally { setBusy(false); }
+  }
   if (!audit) return <>{error ? <ErrorNote message={error} /> : <div className="loading-panel"><Spinner />Opening the report…</div>}<button className="back-button" onClick={onBack}><ArrowLeft size={15} />All audits</button></>;
   const records = audit.results || [];
   const isActive = !terminal(audit.status);
@@ -55,7 +62,7 @@ export function AuditDetail({ id, onBack, onRerun, onUpdate, onOpen = next => { 
       <div className="heading-actions"><Status value={audit.status} />{isActive ? <>
         <button className="button secondary" disabled={busy || audit.status === 'stopping'} onClick={() => void control(audit.status === 'paused' ? 'resume' : 'pause')}>{audit.status === 'paused' ? <Play size={14} /> : <Pause size={14} />}{audit.status === 'paused' ? 'Resume' : 'Pause'}</button>
         <button className="button stop-button" disabled={busy || audit.status === 'stopping'} onClick={() => setStopConfirm(true)}><Square size={12} />Stop</button>
-      </> : <button className="button secondary" onClick={() => onRerun(audit)}><RotateCcw size={14} />Run again</button>}</div>
+      </> : <><button className="icon-button" aria-label="Delete this audit" title="Delete this audit" onClick={() => setDeleteConfirm(true)}><Trash2 size={16} /></button><button className="button secondary" onClick={() => onRerun(audit)}><RotateCcw size={14} />Run again</button></>}</div>
     </div>
     {error && <ErrorNote message={error} />}{audit.error && <ErrorNote message={audit.error} />}
     {!connected && isActive && <div className="soft-note"><Clock3 size={16} />Reconnecting to the live feed. Your audit continues on the server.</div>}
@@ -83,6 +90,7 @@ export function AuditDetail({ id, onBack, onRerun, onUpdate, onOpen = next => { 
       {tab === 'activity' && <section className="activity-panel"><h2>Activity</h2><div className="event-list">{audit.events?.length ? audit.events.map(e => <div className="event-item" key={e.id}><span className={`event-dot ${e.kind}`} /><time>{new Date(e.created * 1000).toLocaleTimeString('en-GB')}</time><p>{e.message}</p></div>) : <p>Preparing the event feed…</p>}</div></section>}
     </div>
     {replay && <ReplayDialog audit={audit} run={replay} close={closeReplay} others={replayable} open={setReplay} />}
+    {deleteConfirm && <Dialog close={closeDelete} title="Delete this audit?"><div className="confirm-dialog"><span className="empty-icon"><Trash2 size={22} /></span><h2>Delete this audit?</h2><p>Its report, screenshots and replays are removed from this computer. This cannot be undone. Exported reports are not affected.</p><div className="confirm-actions"><button className="button secondary" onClick={closeDelete}>Keep it</button><button className="button danger" disabled={busy} onClick={() => void remove()}>{busy ? <Spinner /> : <Trash2 size={13} />}Delete audit</button></div></div></Dialog>}
     {stopConfirm && <Dialog close={closeConfirm} title="Stop this audit?"><div className="confirm-dialog"><span className="empty-icon"><Square size={22} /></span><h2>Stop every agent?</h2><p>We ask H to cancel every active session and skip the remaining runs. Results collected so far stay in your history.</p><div className="confirm-actions"><button className="button secondary" onClick={closeConfirm}>Keep exploring</button><button className="button danger" disabled={busy} onClick={() => void control('stop')}>{busy ? <Spinner /> : <Square size={13} />}Stop audit</button></div></div></Dialog>}
   </>;
 }

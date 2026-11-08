@@ -491,6 +491,23 @@ def control(audit_id: str, action: Literal["pause", "resume", "stop"], user=Depe
     return owned_audit(audit_id, user)
 
 
+@app.delete("/api/audits/{audit_id}")
+def delete_audit(audit_id: str, user=Depends(current_user)):
+    """Delete a finished audit, its events and its files (screenshots, replays, snapshots). Re-evaluations of it stay."""
+    import shutil
+    audit = owned_audit(audit_id, user)
+    if audit["status"] not in TERMINAL:
+        raise HTTPException(409, "Stop this audit before deleting it.")
+    with store.connect() as db:
+        db.execute("UPDATE audits SET parent_id=NULL WHERE parent_id=? AND user_id=?", (audit_id, user["id"]))
+        db.execute("DELETE FROM events WHERE audit_id=?", (audit_id,))
+        db.execute("DELETE FROM audits WHERE id=? AND user_id=?", (audit_id, user["id"]))
+    folder = store.DATA / "audits" / audit_id
+    if folder.is_dir() and folder.parent == store.DATA / "audits":
+        shutil.rmtree(folder, ignore_errors=True)
+    return {"ok": True}
+
+
 @app.get("/api/audits/{audit_id}/export")
 def export(audit_id: str, user=Depends(current_user)):
     data = audit_detail(audit_id, user)
