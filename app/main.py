@@ -419,9 +419,16 @@ def audit_detail(audit_id: str, user=Depends(current_user)):
                               "ORDER BY created DESC", (audit_id, user["id"])).fetchall()
         audit["reevaluations"] = [store.serialize(row) for row in children]
         if audit.get("parent_id"):
-            parent = db.execute("SELECT id,name,summary,fixes FROM audits WHERE id=? AND user_id=?",
+            parent = db.execute("SELECT id,name,summary,fixes,scores,results,config FROM audits WHERE id=? AND user_id=?",
                                 (audit["parent_id"], user["id"])).fetchone()
             audit["parent"] = store.serialize(parent) if parent else None
+            if audit["parent"]:
+                par = audit["parent"]
+                if not par.get("scores") and par.get("results"):
+                    from scoring import scorecard
+                    par["scores"] = scorecard(par["results"], par["config"].get("personas"))
+                par.pop("results", None)
+                par.pop("config", None)
     return audit
 
 

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowRight, ArrowUpRight, CheckCircle2, Play, RotateCcw, Sparkles, Wrench, X } from 'lucide-react';
-import { api, Dialog, ErrorNote, pct, pname, PersonaIcon, Spinner, Status, terminal } from './shared';
+import { api, Dialog, ErrorNote, pct, pname, PersonaIcon, ScoreRing, Spinner, Status, terminal } from './shared';
 import type { Audit, Comparison, Fix, Fixes, Summary } from './shared';
 
 const score = (rows: Summary[] = []) => {
@@ -69,10 +69,13 @@ function FixCard({ fix, comparison, base }: { fix: Fix; comparison?: Comparison;
 }
 
 function BeforeAfterScores({ parent, audit, onOpen }: { parent: NonNullable<Audit['parent']>; audit: Audit; onOpen: (id: string) => void }) {
-  return <section className="section"><div className="section-heading"><div><h2>With fixes: score {score(parent.summary) ?? '—'} → {score(audit.summary) ?? '—'}</h2><p>Same journeys and perspectives as <button className="text-button" onClick={() => onOpen(parent.id)}>{parent.name}</button>, with its {parent.fixes?.patch?.fixes?.length || 0} suggested fixes injected in every page.</p></div></div>
+  const before = parent.scores || {}, after = audit.scores || {};
+  return <section className="section reeval-compare"><div className="section-heading"><div><h2>With the fixes applied</h2><p>Same journeys and perspectives as <button className="text-button" onClick={() => onOpen(parent.id)}>{parent.name}</button>, with its {parent.fixes?.patch?.fixes?.length || 0} suggested fixes injected in every page.</p></div></div>
+    <div className="reeval-rings"><div><ScoreRing score={before.score ?? score(parent.summary)} grade={before.grade} size={110} stroke={9} label="Before" /><span>Before</span></div><ArrowRight size={26} aria-hidden="true" /><div><ScoreRing score={after.score ?? score(audit.summary)} grade={after.grade} size={110} stroke={9} label="With fixes" /><span>With fixes</span></div></div>
     <div className="table-wrap"><table className="breakdown-table"><thead><tr><th>Perspective</th><th>Before</th><th>With fixes</th></tr></thead><tbody>{audit.config.personas.map(p => {
-      const b = rate(parent.summary, p), a = rate(audit.summary, p);
-      return <tr key={p}><td><strong>{pname(p)}</strong></td><td>{pct(b)}</td><td className={a != null && b != null && a > b ? 'improved' : ''}>{pct(a)}</td></tr>;
+      const b = before.perspectives?.[p], a = after.perspectives?.[p];
+      const cell = (x: typeof a, fallback: number | null) => x ? <span className="reeval-cell"><b>{x.score ?? '—'}</b><small>{x.completion === 1 ? 'completed' : x.completion ? `${Math.round(100 * x.completion)}% completed` : x.completion === 0 ? 'blocked' : 'not scored'}{x.steps ? ` · ${x.steps} steps` : ''}</small></span> : pct(fallback);
+      return <tr key={p}><td><strong>{pname(p)}</strong></td><td>{cell(b, rate(parent.summary, p))}</td><td className={(a?.score ?? -1) > (b?.score ?? 101) ? 'improved' : ''}>{cell(a, rate(audit.summary, p))}</td></tr>;
     })}</tbody></table></div></section>;
 }
 
