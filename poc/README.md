@@ -130,7 +130,7 @@ Channel cancellation is also attempted and checked; H may still retain channel s
 - **Sessions stuck at step 0.** From about 00:50 CET, many sessions started a few seconds apart received their
   first observation and then never got a model step: status `running`, `steps: 0`, for hours. Neither
   `cancel_session`, `pause_session` nor `force_session_answer` ends them; they hold their slot until stopped from
-  the H web UI. Single sessions started fine at the same time (both `holo4-27b` and `holo4-35b-a3b`). Humble now
+  the H web UI. Single sessions started fine at the same time (both `holo4-27b` and `holo4-35b-a3b`). Taking over the stuck session's browser channel with a new session (which H's docs say cancels the earlier one) did not end it either. Humble now
   starts agents one after another (the next waits for the previous one's first step, at most 40 s), detects a
   session without a first step after 90 s, retries it once on a fresh channel, and lists stuck sessions with their
   Agent View links in the report so they can be stopped.
