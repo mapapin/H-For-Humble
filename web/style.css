@@ -72,3 +72,5 @@ body{font-size:15px;line-height:1.5}.main-content{max-width:1340px;padding-top:3
 .fix-changes strong{font-size:12px;font-weight:600}
 .fix-changes ul{margin:4px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px}
 .fix-changes code{font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:2px 7px;overflow-wrap:anywhere}
+
+.fix-progress{display:flex;align-items:flex-start;gap:16px;padding:24px;margin:0 0 24px;border:1px solid #dcd6ed;border-radius:12px;background:#f2eff8;color:#514782}.fix-progress>svg{flex-shrink:0;margin-top:3px}.fix-progress strong{font-size:18px;font-weight:550}.fix-progress p{font-size:15px;line-height:1.6;margin:8px 0;color:var(--muted)}.fix-progress a{display:inline-flex;align-items:center;gap:6px;text-decoration:underline;font-size:14px}

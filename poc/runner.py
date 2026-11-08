@@ -126,6 +126,20 @@ class PersonaBridge(SeleniumBrowserBridge):
 
     def create_driver(self):
         driver = super().create_driver()
+        try:
+            # ChromeDriver can attach with a stale current-window context even though
+            # Chrome's page is alive (seen with Chrome 157, especially in parallel).
+            # focus_latest_tab() skips the single-tab case, so select it explicitly.
+            tabs = driver.get_tabs()
+            if not tabs:
+                raise RuntimeError("Chrome has no page tab available for the audit")
+            driver.switch_tab_by_id(tabs[-1])
+            # An allocated driver is not proof that its browser is usable. Check the
+            # same observation path H needs before advertising bridge readiness.
+            driver.observation_bundle(include_markdown=False)
+        except Exception:
+            driver.destroy()
+            raise
         if self.vault is not None:
             self.vault.driver = driver
             driver.attach_vault(self.vault)
@@ -826,6 +840,11 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
                 record["cleanup_error"] = f"chrome: {exc}"
 
     browser_actions = [a for a in record.get("actions", []) if not a["cmd"].startswith("tool:")]
+    if any("no such window" in str(a.get("error", "")).lower()
+           or "web view not found" in str(a.get("error", "")).lower()
+           for a in record.get("actions", [])):
+        record["harness_warning"] = "Selenium lost its browser window; this is not a website accessibility failure"
+        record["status"] = "harness_error"
     if record.get("steps") and not browser_actions and not record.get("commands_served"):
         # The agent acted but none of its browser commands went through PersonaBridge._dispatch, so persona
         # filters were not applied: the run must not be trusted.

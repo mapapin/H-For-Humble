@@ -78,8 +78,11 @@ def suggest_fixes(records: list[dict], rows: list[dict], base_dir: str | Path, s
     patch = merge_patches(previous, new)
     (out_dir / "patch.json").write_text(json.dumps(patch, indent=2))
     headers = (site.get("auth") or {}).get("headers")
+    getattr(fixer, "on_progress", lambda **kw: None)(
+        fix_status="rendering", message="Fixes are ready. Preparing before/after previews…")
     comparisons = build_comparisons(records, base_dir, patch, out_dir, headers=headers) if patch["fixes"] else []
     suggestions = {"created": time.time(), "source": new.get("source"), "devin_session_url": new.get("devin_session_url"),
+                   "fallback_reason": new.get("fallback_reason"),
                    "new_fix_ids": [f["id"] for f in new["fixes"]], "patch": patch, "comparisons": comparisons,
                    "score": score(rows), "rates": persona_rates(rows)}
     (out_dir / "suggestions.json").write_text(json.dumps(suggestions, indent=2))

@@ -12,6 +12,46 @@ from personas import PERSONAS
 
 
 class WorkerTests(unittest.TestCase):
+    def setUp(self):
+        # Worker unit tests must not launch a real browser for the post-run axe scan.
+        scan = patch("static_scan.scan_snapshots", return_value={"pages": [], "violations": [], "totals": {}})
+        scan.start()
+        self.addCleanup(scan.stop)
+
+    def test_driver_selects_the_only_tab_before_its_first_observation(self):
+        """A live page with a stale ChromeDriver window must be usable before H starts."""
+        class Driver:
+            focused = False
+            observed = False
+
+            def get_tabs(self):
+                return ["existing-page"]
+
+            def switch_tab_by_id(self, tab):
+                self.focused = tab == "existing-page"
+
+            def observation_bundle(self, include_markdown=False):
+                if not self.focused:
+                    raise RuntimeError("no such window: target window already closed")
+                self.observed = True
+
+        existing = Driver()
+        bridge = PersonaBridge(PERSONAS["baseline"], 9400, "test-key", 1)
+        with patch.object(SeleniumBrowserBridge, "create_driver", return_value=existing):
+            self.assertIs(bridge.create_driver(), existing)
+        self.assertTrue(existing.focused)
+        self.assertTrue(existing.observed)
+
+    def test_driver_preflight_failure_destroys_unusable_driver(self):
+        existing = MagicMock()
+        existing.get_tabs.return_value = ["existing-page"]
+        existing.observation_bundle.side_effect = RuntimeError("no such window")
+        bridge = PersonaBridge(PERSONAS["baseline"], 9400, "test-key", 1)
+        with patch.object(SeleniumBrowserBridge, "create_driver", return_value=existing):
+            with self.assertRaisesRegex(RuntimeError, "no such window"):
+                bridge.create_driver()
+        existing.destroy.assert_called_once()
+
     def test_fresh_channels_are_the_default(self):
         self.assertFalse(Lane(0, 9400).reuse_channel)
 
