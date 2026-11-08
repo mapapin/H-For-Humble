@@ -247,13 +247,20 @@ class DevinFixer:
         r.raise_for_status()
         session = r.json()
         sid, url = session["session_id"], session.get("url")
+        progress = getattr(self, "on_progress", lambda **kw: None)
+        progress(fix_status="writing", devin_session_url=url,
+                 message="Devin is working in the background. Fixes usually take a few minutes.")
         print(f"Devin session {url}", flush=True)
         deadline = time.monotonic() + self.timeout_s
         while time.monotonic() < deadline:
             time.sleep(15)
-            s = self.http.get(f"{self.base}/sessions/{sid}").json()
+            response = self.http.get(f"{self.base}/sessions/{sid}")
+            response.raise_for_status()
+            s = response.json()
             out = s.get("structured_output")
             status, detail = s.get("status"), s.get("status_detail")
+            progress(fix_status="writing", devin_status=detail or status,
+                     message="Devin is working in the background. Fixes usually take a few minutes.")
             print(f"Devin {sid}: {status}/{detail} · structured output: {bool(out)}", flush=True)
             if out and out.get("fixes") is not None and (detail in ("finished", "waiting_for_user")
                                                          or status in ("exit", "suspended")):
@@ -282,6 +289,9 @@ class FallbackFixer:
             self.error = "Devin returned no fix"
         except Exception as exc:
             self.error = f"{type(exc).__name__}"
+        getattr(self, "on_progress", lambda **kw: None)(
+            fix_status="fallback", fix_provider="local",
+            message="Devin could not provide fixes. Humble is preparing local suggestions instead.")
         out = self.fallback.generate(records, rows, base_dir, site, previous)
         self.source = out.get("source") or self.fallback.source
         return {**out, "fallback_reason": self.error}

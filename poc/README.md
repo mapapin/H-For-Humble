@@ -125,6 +125,16 @@ WCAG criterion. Across all our valid runs the baseline succeeded every time.
 Session cleanup: each run requests cancellation and verifies a terminal state before releasing its browser.
 Channel cancellation is also attempted and checked; H may still retain channel slots until its own cleanup.
 
+### Chrome alive, but Selenium reports "no such window"
+
+On macOS with Chrome/ChromeDriver 157, parallel browser attachment reproduced a stale current-window
+context: Selenium failed on its first screenshot while our direct DevTools connection still captured the
+same page. Serializing driver creation alone did not eliminate it. Explicitly selecting the existing tab
+(even when there is only one) restored the driver. `PersonaBridge.create_driver()` now selects the tab and
+checks an observation before the bridge becomes ready. A later "no such window" failure is classified as a
+technical harness error, so it does not count as a website accessibility failure. Verified with five local
+parallel browsers and fifteen observations; no H session was needed for this diagnostic.
+
 ### Night of 2026-11-07/08 (5 agents in parallel in the app)
 
 - **Sessions stuck at step 0.** From about 00:50 CET, many sessions started a few seconds apart received their
