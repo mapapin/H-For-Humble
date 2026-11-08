@@ -155,8 +155,10 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
                     on_event = lambda data, idx=idx: emit("progress", lane=idx, **data)
                     record = run_one(spec, lane=lane, on_event=on_event, stop_event=halt)
                     dead_recycled = record.get("recycled_channel") and record.get("stalled")
+                    # A stalled session (no step, H sometimes never starts it) is retried even if H cannot confirm it
+                    # closed: our browser is gone, so it can no longer act; it only holds a slot until H ends it.
                     if record.get("status") == "harness_error" and not halt.is_set() and (
-                            record.get("session_closed") is not False or dead_recycled):
+                            record.get("session_closed") is not False or record.get("stalled")):
                         # One retry on a fresh browser channel: stalls, setup errors and a recycled channel that stopped
                         # delivering commands are transient. (A session stuck on a dead channel ends at its time limit.)
                         emit("progress", lane=idx, message=f"{persona.replace('_', ' ').capitalize()}: "
