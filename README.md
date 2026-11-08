@@ -65,8 +65,9 @@ Two deliberately inaccessible demo sites are included:
    booking card at 200% zoom; colour blind books a sold-out date), then the **Fixes** tab: drag the slider, and
    click **Evaluate again with fixes**.
 5. Try a real site: **Audit this site** with `https://www.mousquetaires.com/` and **Suggest journeys** (Linkup).
-6. No time to run it? Open the sample reports in [`docs/`](docs/) in a browser: they are real audits exported
-   from Humble.
+6. No time to run it? Open the sample reports in [`docs/`](docs/) in a browser (real audits exported from Humble,
+   with their replays), or watch [`docs/montage-demo-shop.mp4`](docs/montage-demo-shop.mp4): five agents' replays
+   side by side (`scripts/montage.py <audit-id>` makes one from any finished audit).
 
 Before a live demo, run `.venv/bin/python scripts/preflight.py`: it checks the app, the demo sites, Chrome, the
 H slots and lists any H session stuck in "running" (stop those in H Agent View).
