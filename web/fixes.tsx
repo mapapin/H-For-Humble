@@ -82,7 +82,9 @@ function BeforeAfterScores({ parent, audit, onOpen }: { parent: NonNullable<Audi
 function Rounds({ audit }: { audit: Audit }) {
   const rounds = audit.rounds!;
   const last = rounds[rounds.length - 1];
+  const grade = (n: number) => n >= 90 ? 'A' : n >= 75 ? 'B' : n >= 60 ? 'C' : n >= 40 ? 'D' : 'F';
   return <section className="section"><div className="section-heading"><div><h2>Automatic fix loop: score {rounds[0].score} → {last.score}</h2><p>{last.passed ? `Every perspective passed after ${rounds.length} round${rounds.length > 1 ? 's' : ''}.` : last.stopped || `Stopped after ${rounds.length} rounds (limit ${audit.config.max_rounds}).`}</p></div></div>
+    {rounds.length > 1 && <div className="reeval-rings">{rounds.map((r, i) => <React.Fragment key={r.round}>{i > 0 && <ArrowRight size={26} aria-hidden="true" />}<div><ScoreRing score={r.score} grade={grade(r.score)} size={96} stroke={8} label={`Round ${r.round + 1}`} /><span>Round {r.round + 1}{r.fixes_applied.length ? ` · ${r.fixes_applied.length} fixes` : ' · as is'}</span></div></React.Fragment>)}</div>}
     <div className="table-wrap"><table className="breakdown-table"><thead><tr><th>Round</th><th>Score</th>{audit.config.personas.map(p => <th key={p}>{pname(p)}</th>)}<th>Fixes applied</th></tr></thead><tbody>{rounds.map(r => <tr key={r.round}><td><strong>{r.round + 1}</strong>{r.passed && <CheckCircle2 size={14} className="passed-icon" />}</td><td>{r.score}</td>{audit.config.personas.map(p => <td key={p}>{pct(r.rates[p])}</td>)}<td>{r.fixes_applied.length ? r.fixes_applied.join(', ') : 'none'}</td></tr>)}</tbody></table></div></section>;
 }
 
