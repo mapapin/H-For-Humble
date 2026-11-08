@@ -77,4 +77,10 @@ eyes. Humble turns that into a score, replays and fixes your team can ship."
 
 ## Recorded results
 
-(filled in from real audits; see the app's history)
+- **Lune** (final version, first open date Tue 8 Dec): **49/D**. Baseline 6 steps, tremor completes; colour blind books a
+  sold-out date, discovers the waitlist at checkout and needs 15 steps; low vision and keyboard-only are blocked.
+  axe-core: 4 rules, none for those blockers. **With the 4 fixes: 85/B, all five perspectives complete.**
+- **Mugs & Co**: 39/F with 5 agents in parallel; with fixes 40 → 100; "Fix until it passes" 33 → 100 in 2 rounds.
+  axe-core flags 1 rule while 3 perspectives are blocked.
+- **mousquetaires.com**: declared "partially compliant with RGAA 4.1.2 (69%)", self-assessed (Linkup);
+  measured: everyone finds the Roady figure, but low vision needs 4.7× the steps.
