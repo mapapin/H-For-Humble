@@ -38,9 +38,6 @@ class ResearchTests(unittest.TestCase):
             search.assert_not_called()
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class ResilienceTests(unittest.TestCase):
     def test_failed_search_still_reads_the_statement(self):
@@ -48,3 +45,7 @@ class ResilienceTests(unittest.TestCase):
             got = site_context("https://www.example.fr/")
         self.assertEqual(got["declared_compliance"], "Partially compliant with RGAA 4.1.2 (69% of applicable criteria met)")
         self.assertEqual(got["organisation"], "www.example.fr")
+
+
+if __name__ == "__main__":
+    unittest.main()
