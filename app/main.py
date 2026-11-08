@@ -415,7 +415,7 @@ def audit_detail(audit_id: str, user=Depends(current_user)):
         rows = db.execute("SELECT id,created,kind,message FROM events WHERE audit_id=? ORDER BY id DESC LIMIT 100", (audit_id,)).fetchall()
         audit["events"] = [dict(row) for row in reversed(rows)]
         # Re-evaluation links: a child audit re-runs its parent's journeys with the parent's suggested fixes.
-        children = db.execute("SELECT id,name,status,created,summary FROM audits WHERE parent_id=? AND user_id=? "
+        children = db.execute("SELECT id,name,status,created,summary,scores FROM audits WHERE parent_id=? AND user_id=? "
                               "ORDER BY created DESC", (audit_id, user["id"])).fetchall()
         audit["reevaluations"] = [store.serialize(row) for row in children]
         if audit.get("parent_id"):
