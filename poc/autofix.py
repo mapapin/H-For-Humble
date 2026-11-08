@@ -47,13 +47,7 @@ KEYBOARD_CSS = """
   outline: 3px solid #2563eb !important; outline-offset: 2px !important;
   box-shadow: 0 0 0 6px rgba(37, 99, 235, .28) !important;
 }
-/* hover-only menus: a submenu also opens while keyboard focus is inside its menu item */
-nav li:focus-within > ul, nav li:focus-within > .sub-menu, nav li:focus-within > [class*="submenu"],
-nav li:focus-within > [class*="sub-menu"], nav li:focus-within > [class*="dropdown"], nav li:focus-within > [class*="mega"],
-header li:focus-within > ul, .menu-item:focus-within > .sub-menu {
-  display: block !important; visibility: visible !important; opacity: 1 !important; max-height: none !important;
-  pointer-events: auto !important; transform: none !important; clip: auto !important; clip-path: none !important;
-}"""
+"""
 
 TARGET_JS = r"""
 var sel = 'a[href],button,input[type=checkbox],input[type=radio],input[type=button],input[type=submit],select,[role=button],[onclick],[tabindex="0"]';
