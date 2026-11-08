@@ -71,6 +71,7 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
 
     abort = threading.Event()
     halt = AnyEvent(stopped, abort)
+    start_gate = threading.Semaphore(1)  # agents start one after another (see runner.run_one)
     opened_lanes = []
 
     def research():  # Linkup: declared accessibility compliance + legal context, shown next to the measured scores
@@ -151,6 +152,7 @@ def audit_worker(audit_id, config, credentials, out_dir, messages, stopped, paus
                         "port": lane.port, "out_dir": out_dir, "headless": True,
                         "group_id": f"humble-{audit_id}", "login_mode": "tool",
                         "patch_script": script, "round": rnd, "live_name": f"live-{idx}.png",
+                        "start_gate": start_gate,
                     }
                     on_event = lambda data, idx=idx: emit("progress", lane=idx, **data)
                     record = run_one(spec, lane=lane, on_event=on_event, stop_event=halt)

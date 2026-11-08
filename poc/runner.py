@@ -274,6 +274,7 @@ def wait_terminal(handle, timeout_s: float) -> str | None:
 
 
 FIRST_STEP_S = 90  # a session that has not made its first step by then never received the browser
+START_GATE_TIMEOUT_S = 40  # the next agent starts at the latest this long after the previous one
 
 
 def wait_with_watchdog(handle, total_s: float, tag: str, stall_s: float = STALL_S, poll_s: float = 60,
@@ -517,6 +518,7 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
     record: dict[str, Any] = {"persona": persona.id, "task": task["id"], "run": spec["run_index"], "tag": tag}
 
     port = lane.port if lane is not None else spec["port"]
+    start_gate, gate_held = spec.get("start_gate"), False  # threading.Semaphore shared by an audit's lanes
     chrome = devtools = bridge = serving = handle = None
     monitor_done = threading.Event()
     monitor = None
@@ -558,6 +560,13 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
         # A self-hosted browser channel is itself a trajectory holding a session slot, and opening one at capacity
         # is refused (429). Runs therefore go one at a time through this cross-process lock, from the slot check
         # until their agent session exists, so two runs never count the same free slots.
+        if start_gate is not None:
+            # One agent starts at a time and the next waits for its first step: when several sessions were started
+            # a few seconds apart, H often never ran their first model step (sessions stuck "running" at step 0).
+            while not start_gate.acquire(timeout=1):
+                if stop_event is not None and stop_event.is_set():
+                    raise RuntimeError("Audit stopped before starting an H session")
+            gate_held = True
         lock = open(CHANNEL_LOCK, "w")
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
@@ -617,6 +626,20 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
             fcntl.flock(lock, fcntl.LOCK_UN)
             lock.close()
         record["session_id"] = handle.id
+        if gate_held:
+            def release_on_first_step():
+                deadline = time.monotonic() + START_GATE_TIMEOUT_S
+                while time.monotonic() < deadline and not monitor_done.is_set():
+                    try:
+                        if (handle.status().steps or 0) >= 1:
+                            break
+                    except Exception:
+                        pass
+                    time.sleep(2)
+                start_gate.release()
+
+            gate_held = False  # the releasing thread owns it now
+            threading.Thread(target=release_on_first_step, daemon=True, name="start-gate").start()
         record["agent_view_url"] = f"https://platform.hcompany.ai/agents/sessions/{handle.id}"
         print(f"[{tag}] started {record['agent_view_url']}", flush=True)
         if reuse:
@@ -698,6 +721,8 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
         record["stalled"] = str(exc).startswith("session stalled")
         traceback.print_exc()
     finally:
+        if gate_held:
+            start_gate.release()
         monitor_done.set()
         if monitor is not None:
             monitor.join(timeout=12)
