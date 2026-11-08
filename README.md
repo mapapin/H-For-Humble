@@ -37,6 +37,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 npm install
 cp .env.example .env          # then set HAI_API_KEY=hk-... (and optionally LINKUP_API_KEY, DEVIN_API_KEY + DEVIN_ORG_ID)
+# scripts/devin_fixes.py <audit-id>  asks Devin for the fixes of a finished audit (--from <re-evaluation-id> for round 2)
 npm run build
 npm start                     # http://127.0.0.1:8000
 ```
@@ -120,8 +121,11 @@ Tested end to end with real H sessions (5 agents in parallel on Lune, Mugs & Co 
   tools, live changes feed, session history for replays, Agent View links.
 - **Linkup**: journey suggestions (`/v1/search`, structured output) and the declared accessibility of the site
   (`/v1/fetch` of its accessibility statement).
-- **Devin**: `DevinFixer` (API v3, structured output) writes the fixes when `DEVIN_API_KEY`/`DEVIN_ORG_ID` are set;
-  otherwise hand-written demo fixes and the rule engine are used.
+- **Devin** writes the fixes (`DevinFixer`, API v3 with structured output, `devin_mode: fast` by default): it gets
+  the journey, what each struggling perspective reported and the pages they saw, and returns one previewable fix per
+  barrier plus the real code change. A second round gets what still fails after the first fixes. On Lune, Devin's
+  first 6 fixes took the score from 49 to 74 (low vision and colour blind unblocked) in about 5 minutes. If Devin is
+  not configured or fails, hand-written fixes (demo sites) and the rule engine (any site) are used.
 - **axe-core** (open source) for the static comparison.
 
 ## Privacy and interpretation
