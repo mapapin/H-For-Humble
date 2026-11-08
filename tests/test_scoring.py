@@ -45,3 +45,14 @@ class ScoringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnswerTests(unittest.TestCase):
+    def test_all_facts_with_alternatives(self):
+        from runner import answer_matches
+        spec = "98.00; 10 Dec|December 10"
+        self.assertTrue(answer_matches("Total €98.00 for Thursday 10 December 2026", spec))
+        self.assertTrue(answer_matches("Booked December 10: total 98.00", spec))
+        self.assertFalse(answer_matches("Total €98.00 on Tuesday 15 December", spec))
+        self.assertFalse(answer_matches("Thu 10 Dec, total €49.00", spec))
+        self.assertTrue(answer_matches("Order total €19.90", "19.90"))

@@ -502,6 +502,17 @@ class BridgeThread:
         self.thread.join(timeout=30)
 
 
+def answer_matches(answer: str, expected: str) -> bool:
+    """Expected answer syntax: facts separated by ';' must all appear; alternatives within a fact are separated by
+    '|'. E.g. '98.00; 10 Dec|December 10' = the total and the date. Case-insensitive, spaces normalised."""
+    text = " ".join(answer.lower().split())
+    for fact in expected.split(";"):
+        options = [" ".join(o.lower().split()) for o in fact.split("|") if o.strip()]
+        if options and not any(o in text for o in options):
+            return False
+    return True
+
+
 def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, stop_event=None) -> dict[str, Any]:
     """spec: persona, task, site, run_index, port, out_dir, headless, model (optional).
     With a lane, the run uses the lane's port; with lane.reuse_channel it also reuses its bridge and H channel."""
@@ -798,8 +809,8 @@ def run_one(spec: dict[str, Any], lane: "Lane | None" = None, on_event=None, sto
     expected = task.get("expect_answer_contains")
     rep = record.get("report") or {}
     claimed = bool(rep.get("completed"))
-    if expected is not None:
-        record["success"] = claimed and expected.lower() in str(rep.get("answer", "")).lower()
+    if expected:
+        record["success"] = claimed and answer_matches(str(rep.get("answer", "")), expected)
     else:
         record["success"] = claimed
     record["metrics"] = run_metrics(record)
