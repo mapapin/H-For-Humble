@@ -48,7 +48,9 @@ export function AuditDetail({ id, onBack, onRerun, onUpdate, onOpen = next => { 
   const isActive = !terminal(audit.status);
   const fixCount = audit.fixes?.patch?.fixes?.length || audit.parent?.fixes?.patch?.fixes?.length || 0;
   const lanes = Object.values(audit.progress?.lanes || {}).filter(l => l.state === 'running' || l.state === 'starting').length;
-  const waitingLanes = Object.values(audit.progress?.lanes || {}).filter(l => l.state === 'waiting').length;
+  const waitingAll = Object.values(audit.progress?.lanes || {}).filter(l => l.state === 'waiting');
+  const startingNext = waitingAll.filter(l => (l.message || '').startsWith('Waiting for its turn')).length;
+  const waitingLanes = waitingAll.length - startingNext;
   const replayable = records.filter(r => r.replay?.steps?.length || r.final_screenshot);
   const roundLabel = audit.rounds?.length ? ` · round ${audit.rounds.length + (isActive ? 1 : 0)}` : '';
   return <>
@@ -66,7 +68,7 @@ export function AuditDetail({ id, onBack, onRerun, onUpdate, onOpen = next => { 
     </div>
     {error && <ErrorNote message={error} />}{audit.error && <ErrorNote message={audit.error} />}
     {!connected && isActive && <div className="soft-note"><Clock3 size={16} />Reconnecting to the live feed. Your audit continues on the server.</div>}
-    {isActive && <div className="live-strip"><span className="live-dot" /><strong>{audit.status === 'paused' ? 'Paused: running agents finish, no new run starts' : audit.status === 'stopping' ? 'Stopping: asking H to end every session' : lanes ? `${lanes} agent${lanes > 1 ? 's' : ''} exploring in parallel${waitingLanes ? `, ${waitingLanes} waiting for a free H slot` : ''}${roundLabel}` : waitingLanes ? `Waiting for free H slots${roundLabel}` : `Preparing browsers${roundLabel}`}</strong><span>{audit.progress.completed || 0} of {total(audit)} runs finished · each agent drives its own Chrome with its impairment applied</span></div>}
+    {isActive && <div className="live-strip"><span className="live-dot" /><strong>{audit.status === 'paused' ? 'Paused: running agents finish, no new run starts' : audit.status === 'stopping' ? 'Stopping: asking H to end every session' : lanes ? `${lanes} agent${lanes > 1 ? 's' : ''} exploring in parallel${startingNext ? `, ${startingNext} starting next` : ''}${waitingLanes ? `, ${waitingLanes} waiting for a free H slot` : ''}${roundLabel}` : waitingLanes ? `Waiting for free H slots${roundLabel}` : `Preparing browsers${roundLabel}`}</strong><span>{audit.progress.completed || 0} of {total(audit)} runs finished · each agent drives its own Chrome with its impairment applied</span></div>}
 
     <StuckSessions audit={audit} />
     <ScoreHero audit={audit} />
